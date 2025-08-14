@@ -9,6 +9,8 @@ import { HelmetProvider } from "react-helmet-async";
 // Páginas (lazy)
 const Index = lazy(() => import("./pages/Index"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+
+// Student pages
 const StudentLayout = lazy(() => import("./layouts/StudentLayout"));
 const Dashboard = lazy(() => import("./pages/aluno/Dashboard"));
 const Horario = lazy(() => import("./pages/aluno/Horario"));
@@ -17,12 +19,25 @@ const MaterialDetalhe = lazy(() => import("./pages/aluno/MaterialDetalhe"));
 const Mensagens = lazy(() => import("./pages/aluno/Mensagens"));
 const Pagamentos = lazy(() => import("./pages/aluno/Pagamentos"));
 const Perfil = lazy(() => import("./pages/aluno/Perfil"));
-const ContaBloqueada = lazy(() => import("./pages/ContaBloqueada"));
-const EmManutencao = lazy(() => import("./pages/EmManutencao"));
-const Fatura = lazy(() => import("./pages/Fatura"));
 const Recursos = lazy(() => import("./pages/aluno/Recursos"));
 const Cursos = lazy(() => import("./pages/aluno/Cursos"));
 const CursoDetalhe = lazy(() => import("./pages/aluno/CursoDetalhe"));
+
+// Professor pages
+const ProfessorLayout = lazy(() => import("./layouts/ProfessorLayout"));
+const ProfessorDashboard = lazy(() => import("./pages/professor/Dashboard"));
+const ProfessorAlunos = lazy(() => import("./pages/professor/Alunos"));
+const ProfessorHorarios = lazy(() => import("./pages/professor/Horarios"));
+const ProfessorAulas = lazy(() => import("./pages/professor/Aulas"));
+const ProfessorMateriais = lazy(() => import("./pages/professor/Materiais"));
+const ProfessorMensagens = lazy(() => import("./pages/professor/Mensagens"));
+const ProfessorAvaliacoes = lazy(() => import("./pages/professor/Avaliacoes"));
+const ProfessorPerfil = lazy(() => import("./pages/professor/Perfil"));
+
+// Other pages
+const ContaBloqueada = lazy(() => import("./pages/ContaBloqueada"));
+const EmManutencao = lazy(() => import("./pages/EmManutencao"));
+const Fatura = lazy(() => import("./pages/Fatura"));
 
 const queryClient = new QueryClient();
 
@@ -133,6 +148,18 @@ export default function App() {
                 <Route path="/conta-bloqueada" element={<ContaBloqueada />} />
                 <Route path="/manutencao" element={<EmManutencao />} />
                 <Route path="/fatura" element={<Fatura />} />
+
+                {/* Professor Routes */}
+                <Route path="/professor" element={<ProfessorLayout />}>
+                  <Route index element={<ProfessorDashboard />} />
+                  <Route path="alunos" element={<ProfessorAlunos />} />
+                  <Route path="horarios" element={<ProfessorHorarios />} />
+                  <Route path="aulas" element={<ProfessorAulas />} />
+                  <Route path="materiais" element={<ProfessorMateriais />} />
+                  <Route path="mensagens" element={<ProfessorMensagens />} />
+                  <Route path="avaliacoes" element={<ProfessorAvaliacoes />} />
+                  <Route path="perfil" element={<ProfessorPerfil />} />
+                </Route>
 
                 <Route path="*" element={<NotFound />} />
               </Routes>
