@@ -1,335 +1,304 @@
+import React, { useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Button } from "@/components/ui/button";
-import { Link, useNavigate } from "react-router-dom";
-import { useState, Fragment } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  FileText,
+  Download,
+  Eye,
+  Calendar,
+  Euro,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  CreditCard,
+} from "lucide-react";
 
-// Avatares SVG
-const MaleAvatar = () => (
-	<svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-		<circle cx="18" cy="18" r="18" fill="#e0e7ff" />
-		<ellipse cx="18" cy="15" rx="7" ry="7" fill="#6366f1" />
-		<ellipse cx="18" cy="29" rx="10" ry="6" fill="#a5b4fc" />
-	</svg>
-);
-const FemaleAvatar = () => (
-	<svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-		<circle cx="18" cy="18" r="18" fill="#fce7f3" />
-		<ellipse cx="18" cy="15" rx="7" ry="7" fill="#f472b6" />
-		<ellipse cx="18" cy="29" rx="10" ry="6" fill="#f9a8d4" />
-	</svg>
-);
-
-const mockAccounts = [
-	{ name: "João Silva", gender: "male" },
-	{ name: "Maria Luz", gender: "female" },
+const mockInvoices = [
+  {
+    id: "FAT-2024-001",
+    date: "2024-01-15",
+    amount: 120.00,
+    status: "paid",
+    dueDate: "2024-01-30",
+    description: "Explicações de Matemática - Janeiro 2024",
+    services: [
+      { name: "Explicações Matemática (8h)", price: 100.00 },
+      { name: "Material didático", price: 20.00 }
+    ]
+  },
+  {
+    id: "FAT-2024-002",
+    date: "2024-02-15",
+    amount: 150.00,
+    status: "pending",
+    dueDate: "2024-02-28",
+    description: "Explicações de Física e Matemática - Fevereiro 2024",
+    services: [
+      { name: "Explicações Matemática (6h)", price: 75.00 },
+      { name: "Explicações Física (6h)", price: 75.00 }
+    ]
+  },
+  {
+    id: "FAT-2024-003",
+    date: "2024-03-15",
+    amount: 200.00,
+    status: "overdue",
+    dueDate: "2024-03-30",
+    description: "Explicações múltiplas disciplinas - Março 2024",
+    services: [
+      { name: "Explicações Matemática (8h)", price: 100.00 },
+      { name: "Explicações Física (6h)", price: 75.00 },
+      { name: "Material de apoio", price: 25.00 }
+    ]
+  }
 ];
 
-const Index = () => {
-	const canonical = () => `${window.location.origin}/`;
-	const navigate = useNavigate();
+export default function Faturas() {
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
 
-	const [identifier, setIdentifier] = useState("");
-	const [password, setPassword] = useState("");
-	const [showAccounts, setShowAccounts] = useState(false);
-	const [loading, setLoading] = useState(false);
-	const [showForgot, setShowForgot] = useState(false);
-	const [forgotEmail, setForgotEmail] = useState("");
-	const [forgotSent, setForgotSent] = useState(false);
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "paid":
+        return (
+          <Badge variant="secondary" className="bg-green-100 text-green-700 border-green-200">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            Paga
+          </Badge>
+        );
+      case "pending":
+        return (
+          <Badge variant="secondary" className="bg-yellow-100 text-yellow-700 border-yellow-200">
+            <Clock className="h-3 w-3 mr-1" />
+            Pendente
+          </Badge>
+        );
+      case "overdue":
+        return (
+          <Badge variant="destructive">
+            <AlertCircle className="h-3 w-3 mr-1" />
+            Em atraso
+          </Badge>
+        );
+      default:
+        return <Badge variant="outline">Desconhecido</Badge>;
+    }
+  };
 
-	// Deteta se é email
-	const isEmail = (val: string) => /\S+@\S+\.\S+/.test(val);
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('pt-PT', {
+      style: 'currency',
+      currency: 'EUR'
+    }).format(amount);
+  };
 
-	// Submissão do formulário
-	const handleLogin = (e: React.FormEvent) => {
-		e.preventDefault();
-		setLoading(true);
-		if (isEmail(identifier)) {
-			setTimeout(() => {
-				setLoading(false);
-				setShowAccounts(true);
-			}, 900);
-		} else {
-			setTimeout(() => {
-				setLoading(false);
-				navigate("/aluno");
-			}, 700);
-		}
-	};
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('pt-PT');
+  };
 
-	// Escolha de conta (após email)
-	const handleAccountSelect = () => {
-		setLoading(true);
-		setTimeout(() => {
-			setLoading(false);
-			navigate("/aluno");
-		}, 700);
-	};
+  return (
+    <>
+      <Helmet>
+        <title>Faturas - Centro de Explicações</title>
+        <meta name="description" content="Gerir e visualizar as suas faturas do centro de explicações" />
+      </Helmet>
 
-	return (
-		<main
-			className="min-h-screen flex items-center justify-center"
-			style={{
-				background:
-					"linear-gradient(135deg, #f0f4ff 0%, #e3e9f7 50%, #f9fafb 100%)",
-			}}
-		>
-			{/* Seta voltar atrás */}
-			<button
-				type="button"
-				onClick={() => window.history.back()}
-				className="absolute top-6 left-6 flex items-center gap-2 text-primary font-medium transition z-30 group"
-				style={{ fontSize: 17, padding: "6px 12px", borderRadius: "8px", overflow: "hidden" }}
-			>
-				<svg width="22" height="22" fill="none" viewBox="0 0 24 24">
-					<path d="M15 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-				</svg>
-				<span className="transition-colors">Voltar</span>
-				<style>
-					{`
-						.group {
-							background: transparent;
-							transition: background 0.35s cubic-bezier(.4,0,.2,1), color 0.25s;
-						}
-						.group:hover {
-							background: linear-gradient(90deg, #6366f1 0%, #a5b4fc 100%);
-							color: #fff;
-						}
-						.group:hover span {
-							color: #fff;
-						}
-						.group:active {
-							filter: brightness(0.97);
-						}
-					`}
-				</style>
-			</button>
-			<section className="text-center max-w-md w-full p-8 rounded-xl shadow-lg bg-card relative overflow-hidden">
-				<h1 className="text-4xl font-bold mb-4">Iniciar Sessão</h1>
-				<p className="text-base text-muted-foreground mb-8">
-					Aceda com email ou utilizador.
-				</p>
-				{/* Formulário de login */}
-				<div className="relative min-h-[220px]">
-					{/* Login Form */}
-					<div
-						className={`absolute inset-0 w-full transition-all duration-500 ${
-							!showAccounts && !showForgot
-								? "opacity-100 translate-x-0 z-10"
-								: "opacity-0 pointer-events-none -translate-x-8 z-0"
-						}`}
-					>
-						<form
-							className="flex flex-col gap-4"
-							onSubmit={handleLogin}
-						>
-							<input
-								type="text"
-								placeholder="Email ou utilizador"
-								className="px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary transition"
-								autoComplete="username email"
-								required
-								value={identifier}
-								onChange={(e) => setIdentifier(e.target.value)}
-								disabled={loading}
-							/>
-							<input
-								type="password"
-								placeholder="Palavra-passe"
-								className="px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary transition"
-								autoComplete="current-password"
-								required
-								value={password}
-								onChange={(e) => setPassword(e.target.value)}
-								disabled={loading}
-							/>
-							<Button
-								type="submit"
-								variant="hero"
-								className="mt-2"
-								disabled={loading}
-							>
-								{loading ? "A entrar..." : "Entrar"}
-							</Button>
-						</form>
-						<div className="mt-6">
-							<button
-								type="button"
-								className="text-sm text-primary hover:underline transition"
-								onClick={() => setShowForgot(true)}
-								disabled={loading}
-							>
-								Esqueceu-se da palavra-passe?
-							</button>
-						</div>
-					</div>
-					{/* Escolha de contas associadas ao email */}
-					<div
-						className={`absolute inset-0 w-full transition-all duration-500 ${
-							showAccounts && !showForgot
-								? "opacity-100 translate-x-0 z-10"
-								: "opacity-0 pointer-events-none translate-x-8 z-0"
-						}`}
-					>
-						{showAccounts && (
-							<div
-								className="animate-fade-in flex flex-col items-center gap-4"
-								style={{ minHeight: 220 }}
-							>
-								<div className="mb-2 text-lg font-semibold">
-									Escolha a sua conta
-								</div>
-								<div className="flex flex-col gap-5 w-full">
-									{mockAccounts.map((acc, idx) => (
-										<Button
-											key={idx}
-											variant="outline"
-											className="flex items-center gap-4 justify-start px-8 py-5 text-lg font-medium transition-all duration-200 rounded-xl shadow-sm hover:bg-primary hover:text-white hover:shadow-lg"
-											onClick={handleAccountSelect}
-											disabled={loading}
-											style={{ minHeight: 64 }}
-										>
-											<span className="w-12 h-12 rounded-full bg-white flex items-center justify-center border border-gray-200">
-												{acc.gender === "male" ? <MaleAvatar /> : <FemaleAvatar />}
-											</span>
-											<span>{acc.name}</span>
-										</Button>
-									))}
-								</div>
-								<Button
-									variant="ghost"
-									className="mt-2 text-muted-foreground text-sm"
-									onClick={() => setShowAccounts(false)}
-									disabled={loading}
-								>
-									Voltar
-								</Button>
-							</div>
-						)}
-					</div>
-					{/* Modal esqueceu-se da palavra-passe */}
-					<div
-						className={`absolute inset-0 w-full flex items-center justify-center transition-all duration-500 ${
-							showForgot ? "opacity-100 translate-y-0 z-20" : "opacity-0 pointer-events-none translate-y-8 z-0"
-						}`}
-						style={{ background: showForgot ? "rgba(249,250,251,0.96)" : "transparent" }}
-					>
-						{showForgot && (
-							<div
-								className="bg-white rounded-xl shadow-xl p-8 animate-fade-in flex flex-col items-center"
-								style={{
-									width: "100%",
-									maxWidth: "100%",
-									minWidth: 0,
-									minHeight: "352px", // igual ao card principal (p-8 + text + inputs + botões)
-									display: "flex",
-									justifyContent: "center"
-								}}
-							>
-								<h2 className="text-2xl font-bold mb-2">Recuperar palavra-passe</h2>
-								<p className="text-muted-foreground mb-6 text-sm">
-									Insira o seu email para receber instruções de recuperação.
-								</p>
-								{!forgotSent ? (
-									<Fragment>
-										<form
-											className="w-full flex flex-col gap-4"
-											onSubmit={e => {
-												e.preventDefault();
-												setForgotSent(true);
-												setTimeout(() => {
-													setShowForgot(false);
-													setForgotSent(false);
-													setForgotEmail("");
-												}, 1800);
-											}}
-										>
-											<input
-												type="email"
-												placeholder="O seu email"
-												className="px-4 py-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary transition"
-												required
-												value={forgotEmail}
-												onChange={e => setForgotEmail(e.target.value)}
-												autoFocus
-											/>
-											<Button type="submit" variant="hero">
-												Enviar
-											</Button>
-										</form>
+      <div className="p-6 space-y-6 animate-fade-in">
+        {/* Header */}
+        <div className="space-y-2">
+          <h1 className="text-3xl font-bold text-foreground">Faturas</h1>
+          <p className="text-muted-foreground">
+            Gerir e visualizar as suas faturas e pagamentos
+          </p>
+        </div>
 
+        {/* Summary Cards */}
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="glass-panel">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total em Dívida</CardTitle>
+              <Euro className="h-4 w-4 text-destructive" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-destructive">€350,00</div>
+              <p className="text-xs text-muted-foreground">2 faturas pendentes</p>
+            </CardContent>
+          </Card>
 
+          <Card className="glass-panel">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Pago Este Mês</CardTitle>
+              <CheckCircle className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">€120,00</div>
+              <p className="text-xs text-muted-foreground">1 fatura paga</p>
+            </CardContent>
+          </Card>
 
+          <Card className="glass-panel">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Próximo Vencimento</CardTitle>
+              <Calendar className="h-4 w-4 text-orange-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-foreground">28 Fev</div>
+              <p className="text-xs text-muted-foreground">€150,00 a vencer</p>
+            </CardContent>
+          </Card>
+        </div>
 
+        {/* Invoices List */}
+        <Card className="glass-panel">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              Lista de Faturas
+            </CardTitle>
+            <CardDescription>
+              Histórico completo das suas faturas
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {mockInvoices.map((invoice) => (
+                <div
+                  key={invoice.id}
+                  className="flex items-center justify-between p-4 rounded-lg border border-border/40 hover:bg-accent/20 transition-colors"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium text-foreground">
+                        {invoice.id}
+                      </span>
+                      {getStatusBadge(invoice.status)}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {invoice.description}
+                    </p>
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span>Data: {formatDate(invoice.date)}</span>
+                      <span>Vencimento: {formatDate(invoice.dueDate)}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <div className="text-lg font-bold text-foreground">
+                        {formatCurrency(invoice.amount)}
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedInvoice(invoice)}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        Ver
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(`/fatura/${invoice.id}`, '_blank')}
+                      >
+                        <Download className="h-4 w-4 mr-1" />
+                        PDF
+                      </Button>
+                      {invoice.status !== 'paid' && (
+                        <Button
+                          variant="hero"
+                          size="sm"
+                          onClick={() => window.open(`/pagamento/${invoice.id}`, '_blank')}
+                        >
+                          <CreditCard className="h-4 w-4 mr-1" />
+                          Pagar
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-export default Index;};	);		</main>			</section>				</div>					</div>						)}							</div>								)}									</div>										</Button>											Voltar ao início										>											disabled={loading}											onClick={() => setShowForgot(false)}											className="mt-4 text-muted-foreground text-sm"											variant="ghost"										<Button										</Button>											Pagar										>											onClick={() => window.open('/fatura', '_blank')}											size="sm"											variant="hero"										<Button										</p>											<span className="font-medium text-primary">{forgotEmail}</span>.											Um email com as instruções foi enviado para{" "}										<p className="text-sm text-muted-foreground mb-4">									<div className="text-center">								) : (									</Fragment>										<Button
-											variant="ghost"
-											className="mt-2 text-muted-foreground text-sm"
-											onClick={() => setShowForgot(false)}
-										>
-											Cancelar
-										</Button>
-									</Fragment>
-								) : (
-									<div className="w-full text-center py-8">
-										<p className="text-primary font-semibold mb-2">Verifique o seu email!</p>
-										<p className="text-muted-foreground text-sm">Enviámos instruções para recuperar a palavra-passe.</p>
-									</div>
-								)}
-							</div>
-						)}
-					</div>
-				</div>
-				{/* Animação fade-in */}
-				<style>
-					{`
-						.animate-fade-in {
-							animation: fadeIn .5s cubic-bezier(.4,0,.2,1);
-						}
-						@keyframes fadeIn {
-							from { opacity: 0; transform: translateY(20px);}
-							to { opacity: 1; transform: translateY(0);}
-						}
-					`}
-				</style>
-			</section>
-		</main>
-	);
-};
-
-export default Index;
-<Button
-  variant="outline"
-  size="sm"
-  onClick={() => window.open('/fatura', '_blank')}
->
-  Ver Fatura
-</Button>
+        {/* Invoice Detail Modal */}
+        {selectedInvoice && (
+          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Fatura {selectedInvoice.id}</CardTitle>
+                    <CardDescription>
+                      {formatDate(selectedInvoice.date)}
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedInvoice(null)}
+                  >
+                    ✕
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Estado:</span>
+                  {getStatusBadge(selectedInvoice.status)}
+                </div>
+                
+                <Separator />
+                
+                <div className="space-y-4">
+                  <h4 className="font-medium">Serviços</h4>
+                  {selectedInvoice.services.map((service, index) => (
+                    <div key={index} className="flex justify-between">
+                      <span className="text-sm">{service.name}</span>
+                      <span className="text-sm font-medium">
+                        {formatCurrency(service.price)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                
+                <Separator />
+                
+                <div className="flex justify-between text-lg font-bold">
+                  <span>Total:</span>
+                  <span>{formatCurrency(selectedInvoice.amount)}</span>
+                </div>
+                
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => window.open(`/fatura/${selectedInvoice.id}`, '_blank')}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Descarregar PDF
+                  </Button>
+                  {selectedInvoice.status !== 'paid' && (
+                    <Button
+                      variant="hero"
+                      className="flex-1"
+                      onClick={() => window.open(`/pagamento/${selectedInvoice.id}`, '_blank')}
+                    >
+                      <CreditCard className="h-4 w-4 mr-2" />
+                      Pagar Agora
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
