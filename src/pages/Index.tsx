@@ -45,56 +45,103 @@ const Index = () => {
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
 
-  const [isRecovery, setIsRecovery] = useState(false);
+  // Modal para definir password (apenas para PASSWORD_RECOVERY)
+  const [showSetPassword, setShowSetPassword] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  const [settingPass, setSettingPass] = useState(false);
   const [newPasswordOk, setNewPasswordOk] = useState(false);
 
   const isEmail = (val: string) => /\S+@\S+\.\S+/.test(val);
 
-  // Ouve o evento de recuperação (quando o utilizador vem do link de reset)
-  useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setIsRecovery(true);
-        setShowForgot(false);
-        setForgotSent(false);
-        setError(null);
-      }
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  // ------------ helpers ------------
+  // ---------- helpers ----------
   const storeActiveProfile = (p: Profile) => {
     localStorage.setItem("activeProfileId", p.id);
     localStorage.setItem("activeUsername", p.username);
     localStorage.setItem("activeFullName", p.full_name ?? "");
   };
 
-  const fetchAccountsByEmail = async (email: string): Promise<Profile[]> => {
-    // requer RLS que permita este select (ou fazes isto após login)
-    const { data, error: selErr } = await supabase
+  const mapAuthError = (err: any) => {
+    const m = (err?.message || "").toLowerCase();
+    if (m.includes("email not confirmed") || m.includes("not confirmed")) {
+      return "Tens de confirmar o email primeiro. Verifica a caixa de entrada.";
+    }
+    if (m.includes("invalid login credentials")) {
+      return "Credenciais inválidas. Verifica o email/nome de utilizador e a palavra-passe.";
+    }
+    if (m.includes("user not found")) {
+      return "Utilizador não encontrado.";
+    }
+    return err?.message || "Falha ao iniciar sessão.";
+  };
+
+  const getRoleFromUser = (u: any): string | undefined =>
+    (u?.app_metadata && (u.app_metadata.role || u.app_metadata.user_role)) ||
+    (u?.user_metadata && (u.user_metadata.role || u.user_metadata.user_role));
+
+  const fetchAccountsForCurrentUser = async (): Promise<Profile[]> => {
+    const { data: sess } = await supabase.auth.getSession();
+    const uid = sess.session?.user.id;
+    if (!uid) return [];
+    const { data, error } = await supabase
       .from("users")
       .select("id, username, full_name, gender, email")
-      .eq("email", email);
-
-    if (selErr) {
-      // Sem permissão? devolve vazio para o fluxo cair no fallback do auth
-      return [];
-    }
+      .eq("auth_user_id", uid)
+      .order("username");
+    if (error) return [];
     return (data ?? []) as Profile[];
   };
 
   const fetchAccountByUsername = async (username: string): Promise<Profile | null> => {
-    const { data, error: selErr } = await supabase
+    const { data, error } = await supabase
       .from("users")
       .select("id, username, full_name, gender, email")
       .eq("username", username)
       .limit(1)
       .maybeSingle();
-    if (selErr) return null;
+    if (error) return null;
     return (data as Profile) ?? null;
   };
+
+  const decideAfterAuth = async () => {
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
+    if (!user) {
+      setError("Sessão inválida. Tenta novamente.");
+      return;
+    }
+
+    // Professores vão para /professor
+    const role = getRoleFromUser(user);
+    if (role === "professor" || role === "teacher") {
+      navigate("/professor");
+      return;
+    }
+
+    // Alunos: escolher/definir perfil
+    const list = await fetchAccountsForCurrentUser();
+    if (list.length === 0) {
+      navigate("/completar-perfil");
+      return;
+    }
+    if (list.length === 1) {
+      storeActiveProfile(list[0]);
+      navigate("/aluno");
+      return;
+    }
+    setAccounts(list);
+    setShowAccounts(true);
+  };
+
+  // 1) Só abre modal de password quando vem de recuperação
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setShowSetPassword(true);
+        setError(null);
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   // ------------ actions ------------
   const handleLogin = async (e: React.FormEvent) => {
@@ -106,73 +153,46 @@ const Index = () => {
 
     try {
       if (isEmail(identifier)) {
-        // 1) procura contas por email (se RLS permitir)
-        const list = await fetchAccountsByEmail(identifier);
-
-        if (list.length === 0) {
-          // 2) tenta autenticar mesmo assim → permite distinguir "password errada" vs inexistente
-          const { error: authErr } = await supabase.auth.signInWithPassword({
-            email: identifier,
-            password,
-          });
-          if (authErr) {
-            // Mensagens mais amigáveis
-            if (authErr.message.toLowerCase().includes("invalid login"))
-              throw new Error("Credenciais inválidas. Verifica o email e a palavra-passe.");
-            throw authErr;
-          }
-          // Autenticou mas não vimos contas (RLS fechado) → pede conta ao utilizador?
-          // Como não temos lista, segue direto para /aluno.
-          navigate("/aluno");
-          return;
-        }
-
-        if (list.length === 1) {
-          // autentica e entra nesse perfil
-          const { error: authErr } = await supabase.auth.signInWithPassword({
-            email: identifier,
-            password,
-          });
-          if (authErr) {
-            if (authErr.message.toLowerCase().includes("invalid login"))
-              throw new Error("Palavra-passe errada.");
-            throw authErr;
-          }
-          storeActiveProfile(list[0]);
-          navigate("/aluno");
-          return;
-        }
-
-        // várias contas → autentica primeiro, depois mostra picker
+        // 1) autentica por email/password
         const { error: authErr } = await supabase.auth.signInWithPassword({
           email: identifier,
           password,
         });
-        if (authErr) {
-          if (authErr.message.toLowerCase().includes("invalid login"))
-            throw new Error("Palavra-passe errada.");
-          throw authErr;
-        }
-        setAccounts(list);
-        setShowAccounts(true);
+        if (authErr) throw new Error(mapAuthError(authErr));
+
+        // 2) decide redirecionamento (professor/aluno/picker/completar-perfil)
+        await decideAfterAuth();
         return;
-      } else {
-        // username
-        const profile = await fetchAccountByUsername(identifier);
-        if (!profile) {
-          throw new Error("Utilizador não encontrado.");
-        }
-        const { error: authErr } = await supabase.auth.signInWithPassword({
-          email: profile.email,
-          password,
-        });
-        if (authErr) {
-          if (authErr.message.toLowerCase().includes("invalid login"))
-            throw new Error("Palavra-passe errada.");
-          throw authErr;
-        }
+      }
+
+      // username
+      const profile = await fetchAccountByUsername(identifier);
+      if (!profile) throw new Error("Utilizador não encontrado.");
+
+      const { error: authErr } = await supabase.auth.signInWithPassword({
+        email: profile.email,
+        password,
+      });
+      if (authErr) throw new Error(mapAuthError(authErr));
+
+      // confirma ownership do perfil
+      const { data: sess } = await supabase.auth.getSession();
+      const uid = sess.session?.user.id;
+      if (!uid) throw new Error("Sessão inválida após autenticação.");
+
+      const { data: owned } = await supabase
+        .from("users")
+        .select("id")
+        .eq("id", profile.id)
+        .eq("auth_user_id", uid)
+        .maybeSingle();
+
+      if (owned) {
         storeActiveProfile(profile);
         navigate("/aluno");
+      } else {
+        // não pertence → decide pelo conjunto de contas disponíveis
+        await decideAfterAuth();
       }
     } catch (err: any) {
       setError(err?.message ?? "Falha ao iniciar sessão.");
@@ -181,15 +201,19 @@ const Index = () => {
     }
   };
 
-  // Seleção da conta (após email com várias contas)
   const handleAccountSelect = async (p: Profile) => {
     try {
       setLoading(true);
       setError(null);
-      // Já estamos autenticados por email+password. Só falta “ligar” o perfil ativo.
+      // garante sessão
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess.session) {
+        setError("Sessão expirada. Inicia sessão novamente.");
+        return;
+      }
       storeActiveProfile(p);
       navigate("/aluno");
-    } catch (err: any) {
+    } catch {
       setError("Não foi possível ativar essa conta.");
     } finally {
       setLoading(false);
@@ -201,7 +225,7 @@ const Index = () => {
     e.preventDefault();
     setError(null);
     const { error: resetErr } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-      redirectTo: window.location.origin,
+      redirectTo: window.location.origin, // ao voltar, onAuthStateChange -> PASSWORD_RECOVERY abre modal
     });
     if (resetErr) {
       setError(resetErr.message);
@@ -218,17 +242,22 @@ const Index = () => {
   // Definir nova password (após link de recuperação)
   const handleSetNewPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSettingPass(true);
     setError(null);
     try {
       const { error: updErr } = await supabase.auth.updateUser({ password: newPassword });
       if (updErr) throw updErr;
+
       setNewPasswordOk(true);
-      setTimeout(() => navigate("/aluno"), 800);
+      setTimeout(async () => {
+        setShowSetPassword(false);
+        // depois de actualizar a password, decide para onde ir
+        await decideAfterAuth();
+      }, 600);
     } catch (err: any) {
       setError(err?.message ?? "Não foi possível definir a nova palavra-passe.");
     } finally {
-      setLoading(false);
+      setSettingPass(false);
     }
   };
 
@@ -270,14 +299,14 @@ const Index = () => {
         {/* Mensagens */}
         {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
         {newPasswordOk && (
-          <div className="mb-4 text-sm text-green-600">Palavra-passe atualizada com sucesso. A entrar…</div>
+          <div className="mb-4 text-sm text-green-600">Palavra-passe atualizada com sucesso!</div>
         )}
 
         <div className="relative min-h-[260px]">
           {/* Form de login */}
           <div
             className={`absolute inset-0 w-full transition-all duration-500 ${
-              !showAccounts && !showForgot && !isRecovery
+              !showAccounts && !showForgot && !showSetPassword
                 ? "opacity-100 translate-x-0 z-10"
                 : "opacity-0 pointer-events-none -translate-x-8 z-0"
             }`}
@@ -322,7 +351,7 @@ const Index = () => {
           {/* Picker de contas (email com várias contas) */}
           <div
             className={`absolute inset-0 w-full transition-all duration-500 ${
-              showAccounts && !showForgot && !isRecovery
+              showAccounts && !showForgot && !showSetPassword
                 ? "opacity-100 translate-x-0 z-10"
                 : "opacity-0 pointer-events-none translate-x-8 z-0"
             }`}
@@ -407,14 +436,14 @@ const Index = () => {
             )}
           </div>
 
-          {/* Modal: definir nova password */}
+          {/* Modal: definir nova password (apenas para PASSWORD_RECOVERY) */}
           <div
             className={`absolute inset-0 w-full flex items-center justify-center transition-all duration-500 ${
-              isRecovery ? "opacity-100 translate-y-0 z-30" : "opacity-0 pointer-events-none translate-y-8 z-0"
+              showSetPassword ? "opacity-100 translate-y-0 z-30" : "opacity-0 pointer-events-none translate-y-8 z-0"
             }`}
-            style={{ background: isRecovery ? "rgba(249,250,251,0.96)" : "transparent" }}
+            style={{ background: showSetPassword ? "rgba(249,250,251,0.96)" : "transparent" }}
           >
-            {isRecovery && (
+            {showSetPassword && (
               <div
                 className="bg-white rounded-xl shadow-xl p-8 animate-fade-in flex flex-col items-center"
                 style={{ width: "100%", minHeight: "352px", display: "flex", justifyContent: "center" }}
@@ -433,15 +462,15 @@ const Index = () => {
                     onChange={(e) => setNewPassword(e.target.value)}
                     autoFocus
                   />
-                  <Button type="submit" variant="hero" disabled={loading}>
-                    {loading ? "A atualizar…" : "Guardar nova palavra-passe"}
+                  <Button type="submit" variant="hero" disabled={settingPass}>
+                    {settingPass ? "A atualizar…" : "Guardar nova palavra-passe"}
                   </Button>
                 </form>
                 <Button
                   variant="ghost"
                   className="mt-2 text-muted-foreground text-sm"
-                  onClick={() => setIsRecovery(false)}
-                  disabled={loading}
+                  onClick={() => setShowSetPassword(false)}
+                  disabled={settingPass}
                 >
                   Cancelar
                 </Button>

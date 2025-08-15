@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabaseClient"; // ajusta o path conforme o teu projeto
 import { Helmet } from "react-helmet-async";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +12,29 @@ import { Link } from "react-router-dom";
 const canonical = () => `${window.location.origin}/aluno`;
 
 const Dashboard = () => {
+  const [nomeAluno, setNomeAluno] = useState<string>("");
+
   const proximo = { disciplina: "Matemática", dia: "Quarta-feira", data: "21 Ago", hora: "17:30" };
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Aqui assumes que tens o nome na tabela "users" com a coluna "nome"
+      const { data, error } = await supabase
+        .from("users")
+        .select("full_name")
+        .eq("id", user.id)
+        .single();
+
+      if (!error && data?.full_name) {
+        setNomeAluno(data.full_name);
+      }
+    };
+
+    fetchUserData();
+  }, []);
 
   return (
     <div className="relative">
@@ -24,7 +48,7 @@ const Dashboard = () => {
         <div className="grid md:grid-cols-2 gap-6 p-6 md:p-8">
           <div className="flex flex-col justify-center space-y-4">
             <h1 className="text-3xl md:text-4xl font-bold leading-tight">
-              Bem-vindo(a) à sua Área do Aluno
+              {nomeAluno ? `Bem-vindo(a), ${nomeAluno}` : "Bem-vindo(a) à sua Área do Aluno"}
             </h1>
             <p className="text-muted-foreground">
               Consulte o seu horário, materiais, comunicações e acompanhe o seu progresso.

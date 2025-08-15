@@ -33,12 +33,13 @@ const ProfessorMateriais = lazy(() => import("./pages/professor/Materiais"));
 const ProfessorMensagens = lazy(() => import("./pages/professor/Mensagens"));
 const ProfessorAvaliacoes = lazy(() => import("./pages/professor/Avaliacoes"));
 const ProfessorPerfil = lazy(() => import("./pages/professor/Perfil"));
+const ProfessorAlunoRelatorio = lazy(() => import("./pages/professor/RelatorioAluno"));
 
 // Other pages
 const ContaBloqueada = lazy(() => import("./pages/ContaBloqueada"));
 const EmManutencao = lazy(() => import("./pages/EmManutencao"));
 const Fatura = lazy(() => import("./pages/Fatura"));
-
+const CompletarPerfil = lazy(() => import("./pages/CompletarPerfil"));
 const queryClient = new QueryClient();
 
 const Loader = () => (
@@ -148,6 +149,7 @@ export default function App() {
                 <Route path="/conta-bloqueada" element={<ContaBloqueada />} />
                 <Route path="/manutencao" element={<EmManutencao />} />
                 <Route path="/fatura" element={<Fatura />} />
+                <Route path="/completar-perfil" element={<CompletarPerfil />} />
 
                 {/* Professor Routes */}
                 <Route path="/professor" element={<ProfessorLayout />}>
@@ -159,6 +161,7 @@ export default function App() {
                   <Route path="mensagens" element={<ProfessorMensagens />} />
                   <Route path="avaliacoes" element={<ProfessorAvaliacoes />} />
                   <Route path="perfil" element={<ProfessorPerfil />} />
+                  <Route path="alunos/:id" element={<ProfessorAlunoRelatorio />} />
                 </Route>
 
                 <Route path="*" element={<NotFound />} />
