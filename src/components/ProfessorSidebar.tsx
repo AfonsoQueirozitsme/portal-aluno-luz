@@ -78,7 +78,8 @@ const menuItems = [
 ];
 
 export function ProfessorSidebar() {
-  const { collapsed } = useSidebar();
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
   const location = useLocation();
 
   const isActive = (path: string) => {
