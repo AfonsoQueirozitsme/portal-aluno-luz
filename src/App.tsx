@@ -43,6 +43,7 @@ const ContaBloqueada = lazy(() => import("./pages/ContaBloqueada"));
 const EmManutencao = lazy(() => import("./pages/EmManutencao"));
 const Recuperar = lazy(() => import("./pages/RecuperarPassword"));
 const Setup = lazy(() => import("./pages/Setup"));
+const Landing = lazy(() => import("./pages/Landing"));
 
 const queryClient = new QueryClient();
 
@@ -154,6 +155,7 @@ export default function App() {
                 <Route path="/conta-bloqueada" element={<ContaBloqueada />} />
                 <Route path="/manutencao" element={<EmManutencao />} />
                 <Route path="/recuperar-password" element={<Recuperar />} />
+                <Route path="/landing-page" element={<Landing />} />
                 <Route path="/setup" element={<Setup />} />
                 
 
