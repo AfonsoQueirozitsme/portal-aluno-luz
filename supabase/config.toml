@@ -1,0 +1,12 @@
+project_id = "qzvikwxwvwmngbnyxpwr"
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.lesson-precharge-cron]
+verify_jwt = false
+schedule = "*/5 * * * *"      # a cada 5 minutos (UTC)
+
+[functions.daily-negative-balance-cron]
+verify_jwt = false
+schedule = "0 10 * * *"       # todos os dias às 10:00 UTC (ajusta se precisares)
