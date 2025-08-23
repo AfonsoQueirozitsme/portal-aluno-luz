@@ -71,8 +71,8 @@ export function AppSidebar({ badges = {} }: Props) {
   return (
     <TooltipProvider delayDuration={60}>
       <Sidebar
-        className="custom-sidebar transition-[width] duration-300 w-64 data-[state=collapsed]:w-[104px] data-[collapsed=true]:w-[104px]"
-        collapsible="icon"
+  className="custom-sidebar transition-[width] duration-300 w-64 data-[state=collapsed]:w-[104px] data-[collapsed=true]:w-[104px] pt-10"
+  collapsible="icon"
       >
         <SidebarContent>
           <SidebarHeader>{brand}</SidebarHeader>

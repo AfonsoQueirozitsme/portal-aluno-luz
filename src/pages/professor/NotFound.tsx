@@ -29,31 +29,38 @@ export default function NotFound() {
 
   useEffect(() => {
     if (!root.current) return;
-  
-    const self = gsap.context((selfCtx) => {
+    const ctx = gsap.context(() => {
       const prefersReduced =
+        typeof window !== "undefined" &&
         window.matchMedia &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  
+
       /* ========= Intro ========= */
       const intro = gsap.timeline({ defaults: { ease: "power3.out" } });
       intro
-        .from(".nf-veil", { autoAlpha: 0, scale: 1.04, duration: 0.6 }, 0)
-        .from([d0.current, d1.current, d2.current], {
-          y: 30,
-          opacity: 0,
-          rotateX: -20,
-          transformOrigin: "50% 50% -50px",
-          stagger: 0.07,
-          duration: 0.9,
-        }, 0.1)
-        .from(".nf-sub,.nf-actions", {
-          y: 16,
-          opacity: 0,
-          stagger: 0.08,
-          duration: 0.7,
-        }, 0.35);
-  
+        .from(
+          ".nf-veil",
+          { autoAlpha: 0, scale: 1.04, duration: 0.6 },
+          0
+        )
+        .from(
+          [d0.current, d1.current, d2.current],
+          {
+            y: 30,
+            opacity: 0,
+            rotateX: -20,
+            transformOrigin: "50% 50% -50px",
+            stagger: 0.07,
+            duration: 0.9,
+          },
+          0.1
+        )
+        .from(
+          ".nf-sub,.nf-actions",
+          { y: 16, opacity: 0, stagger: 0.08, duration: 0.7 },
+          0.35
+        );
+
       if (!prefersReduced) {
         /* ========= Loop: flutuação dos dígitos ========= */
         gsap.to([d0.current, d1.current, d2.current], {
@@ -65,7 +72,7 @@ export default function NotFound() {
           repeat: -1,
           stagger: 0.12,
         });
-  
+
         /* ========= Glow a pulsar ========= */
         gsap.to(".nf-glow", {
           opacity: 0.25,
@@ -75,26 +82,20 @@ export default function NotFound() {
           yoyo: true,
           repeat: -1,
         });
-  
+
         /* ========= Spotlight segue o rato ========= */
         if (spotlight.current) {
           const qx = gsap.quickTo(spotlight.current, "x", { duration: 0.25, ease: "power3.out" });
           const qy = gsap.quickTo(spotlight.current, "y", { duration: 0.25, ease: "power3.out" });
-  
           const move = (e: MouseEvent) => {
-            const rootEl = root.current;
-            if (!rootEl) return; // guard para desmontagem
-            const r = rootEl.getBoundingClientRect();
+            const r = root.current!.getBoundingClientRect();
             qx(e.clientX - r.left);
             qy(e.clientY - r.top);
           };
-  
-          // Ouve o rato apenas dentro do root para evitar cálculos fora do componente
-          const rootEl = root.current;
-          rootEl?.addEventListener("mousemove", move);
-          selfCtx.add(() => rootEl?.removeEventListener("mousemove", move));
+          window.addEventListener("mousemove", move);
+          ctx.add(() => window.removeEventListener("mousemove", move));
         }
-  
+
         /* ========= Orbes em órbita ========= */
         if (orbRing.current) {
           gsap.to(orbRing.current, {
@@ -105,9 +106,9 @@ export default function NotFound() {
             repeat: -1,
           });
         }
-  
+
         /* ========= Auroras ========= */
-        if (auroraA.current) {
+        if (auroraA.current && auroraB.current) {
           gsap.to(auroraA.current, {
             xPercent: -10,
             skewX: 6,
@@ -116,8 +117,6 @@ export default function NotFound() {
             yoyo: true,
             repeat: -1,
           });
-        }
-        if (auroraB.current) {
           gsap.to(auroraB.current, {
             xPercent: 14,
             skewX: -8,
@@ -127,10 +126,9 @@ export default function NotFound() {
             repeat: -1,
           });
         }
-  
+
         /* ========= Shards (fragmentos) ========= */
         shards.current.forEach((el, i) => {
-          if (!el) return;
           gsap.to(el, {
             y: gsap.utils.random(-18, 18),
             x: gsap.utils.random(-12, 12),
@@ -142,7 +140,7 @@ export default function NotFound() {
             delay: i * 0.08,
           });
         });
-  
+
         /* ========= Starfield (canvas) ========= */
         if (canvas.current) {
           const c = canvas.current;
@@ -155,14 +153,14 @@ export default function NotFound() {
             z: Math.random() * 0.6 + 0.4,
             s: Math.random() * 1.6 + 0.2,
           }));
-  
+
           const onResize = () => {
             w = c.width = c.offsetWidth * devicePixelRatio;
             h = c.height = c.offsetHeight * devicePixelRatio;
           };
           window.addEventListener("resize", onResize);
-          selfCtx.add(() => window.removeEventListener("resize", onResize));
-  
+          ctx.add(() => window.removeEventListener("resize", onResize));
+
           let raf = 0;
           const loop = () => {
             raf = requestAnimationFrame(loop);
@@ -179,22 +177,23 @@ export default function NotFound() {
             }
           };
           loop();
-          selfCtx.add(() => cancelAnimationFrame(raf));
+          ctx.add(() => cancelAnimationFrame(raf));
         }
       }
-  
+
       /* ========= Glitch toggle (G) ========= */
       const onKey = (e: KeyboardEvent) => {
-        if (e.key.toLowerCase() === "g") root.current?.classList.toggle("nf-glitch");
+        if (e.key.toLowerCase() === "g") {
+          root.current!.classList.toggle("nf-glitch");
+        }
       };
       window.addEventListener("keydown", onKey);
-      selfCtx.add(() => window.removeEventListener("keydown", onKey));
+      ctx.add(() => window.removeEventListener("keydown", onKey));
     }, root);
-  
-    // cleanup global: reverte tudo registado no context
-    return () => self.revert();
+
+    return () => ctx.revert();
   }, []);
-  
+
   return (
     <div
       ref={root}

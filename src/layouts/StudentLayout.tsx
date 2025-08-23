@@ -25,7 +25,7 @@ import {
   LifeBuoy,
   MessageCircle,
   Check,
-  X, // ← cruz para fechar
+  X,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -80,26 +80,22 @@ const ToastCard = ({ toast, onClose }: { toast: ToastItem; onClose: (id: string)
   const rafRef = useRef<number | null>(null);
   const startRef = useRef<number | null>(null);
 
-// dentro de ToastCard -> useEffect cleanup
-useEffect(() => {
-  const step = (t: number) => {
-    if (startRef.current === null) startRef.current = t;
-    const elapsed = t - startRef.current;
-    const pct = Math.max(0, 100 - (elapsed / toast.duration) * 100);
-    setProgress(pct);
-    if (elapsed < toast.duration) {
-      rafRef.current = requestAnimationFrame(step);
-    } else {
-      onClose(toast.id);
-    }
-  };
+  useEffect(() => {
+    const step = (t: number) => {
+      if (startRef.current === null) startRef.current = t;
+      const elapsed = t - startRef.current;
+      const pct = Math.max(0, 100 - (elapsed / toast.duration) * 100);
+      setProgress(pct);
+      if (elapsed < toast.duration) {
+        rafRef.current = requestAnimationFrame(step);
+      } else {
+        onClose(toast.id);
+      }
+    };
 
-  rafRef.current = requestAnimationFrame(step);
-
-  return () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current); // ✅ corrigido
-  };
-}, [toast, onClose]);
+    rafRef.current = requestAnimationFrame(step);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [toast, onClose]);
 
   return (
     <motion.div
@@ -289,6 +285,9 @@ const UTILS_CSS = String.raw`
 export default function StudentLayout() {
   const navigate = useNavigate();
 
+  // Altura fixa da barra informativa (px)
+  const TOP_BAR_H = 40;
+
   // chat flutuante
   const [chatOpen, setChatOpen] = useState(false);
 
@@ -347,7 +346,7 @@ export default function StudentLayout() {
   /* --------- Perfil ativo --------- */
   const loadActiveProfile = async (uid: string): Promise<Profile | null> => {
     const storedNew = localStorage.getItem("active_profile_id");
-       const storedLegacy = localStorage.getItem("activeProfileId");
+    const storedLegacy = localStorage.getItem("activeProfileId");
     const storedId = storedNew || storedLegacy;
 
     if (storedId) {
@@ -484,8 +483,8 @@ export default function StudentLayout() {
   const [reportCategory, setReportCategory] = useState("Erro técnico");
   const [reportText, setReportText] = useState("");
 
-  // Command Palette (rotas principais + ações)
-  const commandItems = useMemo<CommandItem[]>(
+  // Command Palette
+  const commandItems = useMemo(
     () => [
       { label: "Dashboard", to: "/aluno", icon: <Home className="h-4 w-4" /> },
       { label: "Aulas", to: "/aluno/aulas", icon: <Calendar className="h-4 w-4" /> },
@@ -502,11 +501,11 @@ export default function StudentLayout() {
       { label: "Trocar de perfil", action: openProfileSwitcher, icon: <ArrowLeftRight className="h-4 w-4" /> },
       { label: "Sair", action: handleSignOut, icon: <LogOut className="h-4 w-4" /> },
     ],
-    [openProfileSwitcher] // eslint-disable-line
+    [openProfileSwitcher]
   );
   const palette = useCommandPalette(commandItems);
 
-  // Loader minimalista
+  // Loader
   if (loading) {
     return (
       <div className="min-h-screen grid place-items-center bg-gradient-to-br from-background via-background to-muted/30">
@@ -526,141 +525,159 @@ export default function StudentLayout() {
         {/* TOASTS laterais */}
         <ToastStack toasts={toast.toasts} remove={toast.remove} />
 
+        {/* ===== BARRA INFORMATIVA (fixa e acima de tudo) ===== */}
+        <div
+          className="fixed top-0 left-0 right-0 z-[9999] bg-primary text-white text-center text-sm font-medium shadow flex items-center justify-center"
+          style={{ height: TOP_BAR_H }}
+        >
+          <span>
+            Versão em testes. Suporte técnico 24/7 —{" "}
+            <a href="tel:+351928312655" className="underline hover:text-white/80 transition">
+              928 312 655
+            </a>
+          </span>
+        </div>
+
         {/* Sidebar */}
         <AppSidebar />
 
         <SidebarInset>
-          {/* Header */}
-          <motion.header
-            variants={flyDown} initial="hidden" animate="show"
-            className="relative flex h-14 shrink-0 items-center gap-4 px-4 border-b sticky top-0 z-40
-                       bg-gradient-to-r from-background/90 via-background/90 to-background/90
-                       backdrop-blur supports-[backdrop-filter]:bg-background/90"
-          >
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+          {/* Empurrar conteúdo para baixo da barra */}
+          <div style={{ paddingTop: TOP_BAR_H }}>
+            {/* Header (sticky abaixo da barra) */}
+            <motion.header
+              variants={flyDown}
+              initial="hidden"
+              animate="show"
+              className="relative flex h-14 shrink-0 items-center gap-4 px-4 border-b sticky z-40
+                         bg-gradient-to-r from-background/90 via-background/90 to-background/90
+                         backdrop-blur supports-[backdrop-filter]:bg-background/90"
+              style={{ top: TOP_BAR_H }}
+            >
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
 
-            <SidebarTrigger />
-            <Separator orientation="vertical" className="mx-2 h-6" />
+              <SidebarTrigger />
+              <Separator orientation="vertical" className="mx-2 h-6" />
 
-            <div className="flex-1 flex items-center justify-between">
-              <Link to="/aluno" className="inline-flex items-center gap-2 text-sm text-muted-foreground story-link">
-                {displayName}
-              </Link>
+              <div className="flex-1 flex items-center justify-between">
+                <Link to="/aluno" className="inline-flex items-center gap-2 text-sm text-muted-foreground story-link">
+                  {displayName}
+                </Link>
 
-              <div className="flex items-center gap-2">
-                {/* Command Palette button */}
-                <button
-                  onClick={() => palette.setOpen(true)}
-                  className="hidden sm:inline-flex items-center gap-2 px-2.5 h-8 rounded-md border border-border
-                             bg-background hover:bg-primary/10 hover:text-primary transition text-xs"
-                  aria-label="Abrir Command Palette"
-                  title="⌘/Ctrl + K"
-                >
-                  <Command className="h-3.5 w-3.5" />
-                  <span>Comandos</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Command Palette button */}
+                  <button
+                    onClick={() => palette.setOpen(true)}
+                    className="hidden sm:inline-flex items-center gap-2 px-2.5 h-8 rounded-md border border-border
+                               bg-background hover:bg-primary/10 hover:text-primary transition text-xs"
+                    aria-label="Abrir Command Palette"
+                    title="⌘/Ctrl + K"
+                  >
+                    <Command className="h-3.5 w-3.5" />
+                    <span>Comandos</span>
+                  </button>
 
-                {/* Notificações (reais) */}
-                <NotificationDropdown
-                  open={notifOpen}
-                  setOpen={setNotifOpen}
-                  items={notifs}
-                  unread={unreadCount}
-                  onItemClick={onNotificationClick}
-                  onMarkAllRead={markAllAsRead}
-                />
+                  {/* Notificações */}
+                  <NotificationDropdown
+                    open={notifOpen}
+                    setOpen={setNotifOpen}
+                    items={notifs}
+                    unread={unreadCount}
+                    onItemClick={onNotificationClick}
+                    onMarkAllRead={markAllAsRead}
+                  />
 
-                {/* Avatar / Menu */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="rounded-full focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2">
-                      <div className="relative">
-                        <Avatar className="cursor-pointer ring-0 transition hover:ring-2 hover:ring-primary/40">
-                          <AvatarFallback>{initials}</AvatarFallback>
-                        </Avatar>
-                        <span className="pointer-events-none absolute -right-0 -bottom-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
-                      </div>
-                    </button>
-                  </DropdownMenuTrigger>
-
-                  <DropdownMenuContent align="end" className="z-50 bg-popover min-w-[260px] border-border">
-                    <DropdownMenuLabel className="pb-2">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-                          {initials}
+                  {/* Avatar / Menu */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="rounded-full focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2">
+                        <div className="relative">
+                          <Avatar className="cursor-pointer ring-0 transition hover:ring-2 hover:ring-primary/40">
+                            <AvatarFallback>{initials}</AvatarFallback>
+                          </Avatar>
+                          <span className="pointer-events-none absolute -right-0 -bottom-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">
-                            {activeProfile?.full_name || activeProfile?.username || "Utilizador"}
+                      </button>
+                    </DropdownMenuTrigger>
+
+                    <DropdownMenuContent align="end" className="z-50 bg-popover min-w-[260px] border-border">
+                      <DropdownMenuLabel className="pb-2">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
+                            {initials}
                           </div>
-                          {sessionEmail && (
-                            <div className="text-xs text-muted-foreground truncate">{sessionEmail}</div>
-                          )}
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">
+                              {activeProfile?.full_name || activeProfile?.username || "Utilizador"}
+                            </div>
+                            {sessionEmail && (
+                              <div className="text-xs text-muted-foreground truncate">{sessionEmail}</div>
+                            )}
+                          </div>
                         </div>
+                      </DropdownMenuLabel>
+
+                      <DropdownMenuSeparator />
+
+                      {/* Info compacta */}
+                      <div className="px-3 py-2 text-xs space-y-1.5">
+                        {activeProfile?.username && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <AtSign className="h-3.5 w-3.5" />
+                            <span className="truncate">@{activeProfile.username}</span>
+                          </div>
+                        )}
+                        {typeof activeProfile?.level === "number" && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Hash className="h-3.5 w-3.5" />
+                            <span>Nível: {activeProfile.level}</span>
+                          </div>
+                        )}
                       </div>
-                    </DropdownMenuLabel>
 
-                    <DropdownMenuSeparator />
+                      <DropdownMenuSeparator />
 
-                    {/* Info compacta */}
-                    <div className="px-3 py-2 text-xs space-y-1.5">
-                      {activeProfile?.username && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <AtSign className="h-3.5 w-3.5" />
-                          <span className="truncate">@{activeProfile.username}</span>
-                        </div>
-                      )}
-                      {typeof activeProfile?.level === "number" && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Hash className="h-3.5 w-3.5" />
-                          <span>Nível: {activeProfile.level}</span>
-                        </div>
-                      )}
-                    </div>
+                      <DropdownMenuItem asChild>
+                        <Link to="/aluno/perfil" className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          <span>Perfil</span>
+                        </Link>
+                      </DropdownMenuItem>
 
-                    <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link to="/aluno/definicoes" className="flex items-center gap-2">
+                          <Settings className="h-4 w-4" />
+                          <span>Definições</span>
+                        </Link>
+                      </DropdownMenuItem>
 
-                    <DropdownMenuItem asChild>
-                      <Link to="/aluno/perfil" className="flex items-center gap-2">
-                        <User className="h-4 w-4" />
-                        <span>Perfil</span>
-                      </Link>
-                    </DropdownMenuItem>
+                      {/* Trocar de perfil */}
+                      <DropdownMenuItem onClick={openProfileSwitcher} className="flex items-center gap-2">
+                        <ArrowLeftRight className="h-4 w-4" />
+                        <span>Trocar de perfil</span>
+                      </DropdownMenuItem>
 
-                    <DropdownMenuItem asChild>
-                      <Link to="/aluno/definicoes" className="flex items-center gap-2">
-                        <Settings className="h-4 w-4" />
-                        <span>Definições</span>
-                      </Link>
-                    </DropdownMenuItem>
+                      <DropdownMenuSeparator />
 
-                    {/* Trocar de perfil → abre modal full-screen */}
-                    <DropdownMenuItem onClick={openProfileSwitcher} className="flex items-center gap-2">
-                      <ArrowLeftRight className="h-4 w-4" />
-                      <span>Trocar de perfil</span>
-                    </DropdownMenuItem>
-
-                    <DropdownMenuSeparator />
-
-                    <DropdownMenuItem onClick={handleSignOut} className="flex items-center gap-2">
-                      <LogOut className="h-4 w-4" />
-                      <span>Sair</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
+                      <DropdownMenuItem onClick={handleSignOut} className="flex items-center gap-2">
+                        <LogOut className="h-4 w-4" />
+                        <span>Sair</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
-            </div>
-          </motion.header>
+            </motion.header>
 
-          {/* Main */}
-          <motion.main
-            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="flex-1 p-4"
-          >
-            <Outlet />
-          </motion.main>
+            {/* Main */}
+            <motion.main
+              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="flex-1 p-4"
+            >
+              <Outlet />
+            </motion.main>
+          </div>
         </SidebarInset>
 
         {/* Botão reportar erro (esquerda) */}
@@ -674,7 +691,7 @@ export default function StudentLayout() {
           Reportar erro
         </motion.button>
 
-        {/* FAB Suporte → abre chat */}
+        {/* FAB Suporte */}
         <motion.button
           whileHover={{ y: -2 }} whileTap={{ y: 0 }}
           onClick={() => setChatOpen(true)}
@@ -784,7 +801,7 @@ export default function StudentLayout() {
           </DialogContent>
         </Dialog>
 
-        {/* ============== MODAL FULL-PAGE: Trocar de perfil (centrado) ============== */}
+        {/* ============== MODAL FULL-PAGE: Trocar de perfil ============== */}
         <AnimatePresence>
           {switcherOpen && (
             <motion.div className="fixed inset-0 z-[70]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -802,7 +819,7 @@ export default function StudentLayout() {
               />
               <div className="absolute inset-0 backdrop-blur-[10px]" />
 
-              {/* Botão fechar (cruz animada) */}
+              {/* Botão fechar */}
               <motion.button
                 onClick={() => setSwitcherOpen(false)}
                 whileHover={{ rotate: 90, scale: 1.05 }}
@@ -821,12 +838,10 @@ export default function StudentLayout() {
                 exit={{ y: 12, opacity: 0 }}
               >
                 <div className="w-full max-w-6xl">
-                  {/* Título centrado */}
                   <h2 className="text-center text-white font-semibold text-xl sm:text-2xl mb-6 select-none">
                     Quem vai estudar?
                   </h2>
 
-                  {/* Carrossel horizontal (sem setas), centrado */}
                   <div
                     id="profiles-row"
                     className="flex gap-4 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-2 pr-2 mx-auto justify-center"
@@ -866,7 +881,6 @@ export default function StudentLayout() {
                             style={{ boxShadow: "0 10px 30px rgba(0,0,0,0.15)" }}
                             title={p.full_name || p.username}
                           >
-                            {/* brilho interno */}
                             <div className="pointer-events-none absolute -inset-10 opacity-0 hover:opacity-100 transition">
                               <div className="absolute -top-16 -left-16 h-40 w-40 rounded-full bg-indigo-400/20 blur-2xl" />
                               <div className="absolute -bottom-16 -right-16 h-40 w-40 rounded-full bg-violet-300/20 blur-2xl" />
