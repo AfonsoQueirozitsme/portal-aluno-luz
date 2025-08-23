@@ -1,6 +1,11 @@
 // file: src/pages/Landing.tsx
-import { useRef } from "react";
-import { motion, useScroll, useTransform } from "framer-motion";
+import React, { useRef, useState } from "react";
+import {
+  motion,
+  useScroll,
+  useMotionValue,
+  useTransform,
+} from "framer-motion";
 import {
   Sparkles,
   ChevronDown,
@@ -18,6 +23,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
+/* ===================== Vercel ===================== */
+import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
+
+/* ===================== Supabase ===================== */
+import { supabase } from "@/integrations/supabase/client";
+
 /* ===================== Config ===================== */
 const logoUrl =
   "https://qzvikwxwvwmngbnyxpwr.supabase.co/storage/v1/object/sign/static/logo_cores.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lODBjMDg3My1kM2U4LTQ5OWMtODczNy0xYWRlMDUwMGUxNGMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJzdGF0aWMvbG9nb19jb3Jlcy5wbmciLCJpYXQiOjE3NTU4OTYxNzksImV4cCI6MTc4NzQzMjE3OX0.HEDtP3Fbr-pvtGXQw4ldcFHKNk4U6Btx21sBIZ5XjcU";
@@ -27,16 +39,12 @@ const aboutImgUrl =
 
 /* ====================== Styles ===================== */
 const LANDING_CSS = String.raw`
-/* ----- auroras gerais (fundo) em roxos/indigos ----- */
 @keyframes auroraShift {
   0% { transform: translate3d(0,0,0) rotate(0deg); filter: hue-rotate(0deg) saturate(1.05); }
   50% { transform: translate3d(-6%, -4%, 0) rotate(10deg); filter: hue-rotate(15deg) saturate(1.2); }
   100% { transform: translate3d(0,0,0) rotate(0deg); filter: hue-rotate(0deg) saturate(1.05); }
 }
-.hero-aurora {
-  position: absolute; inset: -30vh -10vw -10vh -10vw; z-index: -2;
-  filter: blur(28px) saturate(120%); pointer-events: none;
-}
+.hero-aurora { position: absolute; inset: -30vh -10vw -10vh -10vw; z-index: -3; filter: blur(28px) saturate(120%); pointer-events: none; }
 .hero-aurora > div {
   position:absolute; inset:0;
   background:
@@ -46,7 +54,7 @@ const LANDING_CSS = String.raw`
   animation: auroraShift 22s ease-in-out infinite;
 }
 
-/* ----- gradiente “brand” para texto (sem verdes) ----- */
+/* brand text */
 @keyframes brandFlow {
   0% { background-position: 0% 50%, 100% 50%, 50% 0%; }
   50% { background-position: 100% 50%, 0% 50%, 50% 100%; }
@@ -58,28 +66,32 @@ const LANDING_CSS = String.raw`
     radial-gradient(120% 150% at 90% 20%, #8b5cf6 0%, transparent 55%),
     radial-gradient(160% 140% at 50% 90%, #d946ef 0%, transparent 55%);
   background-size: 200% 200%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
+  background-clip: text; -webkit-background-clip: text; color: transparent;
   animation: brandFlow 14s ease-in-out infinite;
 }
 
-/* mini efeitos */
-@keyframes float { 0% { transform: translateY(0)} 50% {transform: translateY(-10px)} 100% {transform: translateY(0)} }
-@keyframes pulseRing {
-  0% { box-shadow: 0 0 0 0 rgba(99,102,241,.35) }
-  70% { box-shadow: 0 0 0 16px rgba(99,102,241,0) }
-  100% { box-shadow: 0 0 0 0 rgba(99,102,241,0) }
-}
+/* pulse */
+@keyframes pulseRing { 0% { box-shadow: 0 0 0 0 rgba(99,102,241,.35) } 70% { box-shadow: 0 0 0 16px rgba(99,102,241,0) } 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0) } }
 
-/* hover glow dos cards (primário roxo) */
+/* card glow */
 .card-glow::before{
   content:""; position:absolute; inset:-1px; border-radius:inherit; pointer-events:none;
   background: radial-gradient(160px 140px at var(--mx,50%) var(--my,50%), rgba(139,92,246,.16), transparent 65%);
 }
 
-/* marquee parcerias */
+/* marquee */
 @keyframes marquee { 0% { transform: translateX(0) } 100% { transform: translateX(-50%) } }
+
+/* scroller único */
+.app-scroll { scrollbar-gutter: stable both-edges; }
+.app-scroll::-webkit-scrollbar { width: 10px; }
+.app-scroll::-webkit-scrollbar-track { background: transparent; }
+.app-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(139,92,246,.65), rgba(99,102,241,.65));
+  border-radius: 999px; border: 2px solid transparent; background-clip: padding-box;
+}
+.app-scroll::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, rgba(139,92,246,.85), rgba(99,102,241,.85)); }
+.app-scroll { scrollbar-width: thin; scrollbar-color: rgba(139,92,246,.75) transparent; }
 `;
 
 /* ====================== Data ====================== */
@@ -90,7 +102,7 @@ const services = [
   { icon: Users2, title: "Workshops em Grupo", desc: "Sessões práticas com feedback e colaboração." },
 ];
 
-/* Ordem exigida + restantes genéricos */
+/* parceiros */
 const partners = [
   { name: "PsicWell", logo: "https://qzvikwxwvwmngbnyxpwr.supabase.co/storage/v1/object/sign/static/psicwell.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lODBjMDg3My1kM2U4LTQ5OWMtODczNy0xYWRlMDUwMGUxNGMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJzdGF0aWMvcHNpY3dlbGwucG5nIiwiaWF0IjoxNzU1ODk5MTM2LCJleHAiOjE3ODc0MzUxMzZ9.USeZHDR8jNL_JHpZl71P5Ww2kzIagrLvBgJhrmFVZFA" },
   { name: "Sílvia Nogueira", logo: "https://qzvikwxwvwmngbnyxpwr.supabase.co/storage/v1/object/sign/static/silvianogueira.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lODBjMDg3My1kM2U4LTQ5OWMtODczNy0xYWRlMDUwMGUxNGMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJzdGF0aWMvc2lsdmlhbm9ndWVpcmEucG5nIiwiaWF0IjoxNzU1ODk5NDUzLCJleHAiOjE3ODc0MzU0NTN9.BUlT1vzdAGpWf3fUTLq5Kc3tBUdIs-2KsxwCBHujFtk" },
@@ -115,168 +127,217 @@ function scrollToId(id: string) {
 
 /* =================================================== */
 export default function Landing() {
+  /* ===== Parallax ===== */
   const heroRef = useRef<HTMLDivElement | null>(null);
   const { scrollY } = useScroll({ target: heroRef });
   const lift = useTransform(scrollY, [0, 400], [0, -40]);
 
+  const mx = useMotionValue(0);
+  const my = useMotionValue(0);
+  const sBackY = useTransform(scrollY, [0, 400], [0, 30]);
+  const sMidY = useTransform(scrollY, [0, 400], [0, 50]);
+  const sFrontY = useTransform(scrollY, [0, 400], [0, 80]);
+  const rBackX = useTransform(mx, (v) => v * -20);
+  const rBackY = useTransform(my, (v) => v * -14);
+  const rMidX = useTransform(mx, (v) => v * -35);
+  const rMidY = useTransform(my, (v) => v * -26);
+  const rFrontX = useTransform(mx, (v) => v * -55);
+  const rFrontY = useTransform(my, (v) => v * -40);
+  function handleMouse(e: React.MouseEvent<HTMLDivElement>) {
+    const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    mx.set((e.clientX - (r.left + r.width / 2)) / r.width);
+    my.set((e.clientY - (r.top + r.height / 2)) / r.height);
+  }
+
+  /* ===== Marquee duration (dinâmico, sem .to()) ===== */
+  const marqueeDur = useTransform(scrollY, [0, 1000], [22, 16]); // segundos
+  const marqueeDurCss = useTransform(marqueeDur, (v) => `${v}s`);
+
+  /* ===== Formulário Contactos (Supabase) ===== */
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    message: "",
+    website: "", // honeypot (deixa vazio)
+  });
+  const [status, setStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function submitContact(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    if (form.website) return;
+
+    if (form.name.trim().length < 2) return setErrorMsg("Nome demasiado curto.");
+    if (!/\S+@\S+\.\S+/.test(form.email)) return setErrorMsg("Email inválido.");
+    if (form.message.trim().length < 10) return setErrorMsg("Mensagem demasiado curta.");
+
+    setStatus("sending");
+    const { error } = await supabase.from("contact_messages").insert({
+      name: form.name.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim() || null,
+      message: form.message.trim(),
+      user_agent: navigator.userAgent,
+    });
+
+    if (error) {
+      setStatus("error");
+      setErrorMsg("Ocorreu um erro ao enviar. Tenta novamente.");
+      return;
+    }
+
+    setStatus("success");
+    setForm({ name: "", email: "", phone: "", message: "", website: "" });
+  }
+
   return (
-    <div className="relative bg-gradient-to-b from-background via-background to-muted/30">
+    <div className="relative h-[100svh] overflow-hidden bg-gradient-to-b from-background via-background to-muted/30">
       <style dangerouslySetInnerHTML={{ __html: LANDING_CSS }} />
 
-      {/* ===== NAVBAR (logo à esquerda + nome com gradiente brand) ===== */}
+      {/* ===== NAVBAR ===== */}
       <nav className="fixed top-0 left-0 right-0 z-40">
         <div className="mx-auto max-w-6xl px-4">
-          <div className="mt-3 flex items-center justify-between rounded-xl border border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-3 py-2">
+          <div className="mt-3 flex items-center justify-between rounded-2xl border border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 py-3.5">
             <div className="flex items-center gap-3">
               <Link to="/" className="inline-flex items-center gap-3">
-                <img src={logoUrl} alt="Árvore do Conhecimento" className="h-8 w-auto" />
-                <span className="hidden sm:inline-block font-bold tracking-tight text-lg brand-text">
+                <img src={logoUrl} alt="Árvore do Conhecimento" className="h-9 w-auto" />
+                <span className="hidden sm:inline-block font-extrabold tracking-tight text-[1.125rem] brand-text">
                   Árvore do Conhecimento
                 </span>
               </Link>
             </div>
 
-            <div className="hidden sm:flex items-center gap-1">
-              <a href="#sobre" className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition text-sm">Sobre</a>
-              <a href="#fundadoras" className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition text-sm">Fundadoras</a>
-              <a href="#servicos" className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition text-sm">Serviços</a>
-              <a href="#parcerias" className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition text-sm">Parcerias</a>
-              <a href="#contactos" className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition text-sm">Contactos</a>
-              <Button asChild size="sm" className="ml-2">
-  <a href="https://www.arvoreconhecimento.com/auth" target="_blank" rel="noopener noreferrer">
-    Área reservada
-  </a>
-</Button>
-
+            <div className="hidden sm:flex items-center gap-1.5">
+              <a href="#sobre" className="px-2.5 py-1.5 rounded-md hover:bg-primary/10 hover:text-primary transition text-[0.92rem]">Sobre</a>
+              <a href="#fundadoras" className="px-2.5 py-1.5 rounded-md hover:bg-primary/10 hover:text-primary transition text-[0.92rem]">Fundadoras</a>
+              <a href="#servicos" className="px-2.5 py-1.5 rounded-md hover:bg-primary/10 hover:text-primary transition text-[0.92rem]">Serviços</a>
+              <a href="#parcerias" className="px-2.5 py-1.5 rounded-md hover:bg-primary/10 hover:text-primary transition text-[0.92rem]">Parcerias</a>
+              <a href="#contactos" className="px-2.5 py-1.5 rounded-md hover:bg-primary/10 hover:text-primary transition text-[0.92rem]">Contactos</a>
+              <Button asChild size="sm" className="ml-3 h-9 px-4 text-[0.92rem]">
+                <a href="https://www.arvoreconhecimento.com/auth" target="_blank" rel="noopener noreferrer">
+                  Área reservada
+                </a>
+              </Button>
             </div>
           </div>
         </div>
       </nav>
 
-      {/* ===== CONTAINER COM SCROLL SNAP (section a section) ===== */}
-      <main className="snap-y snap-mandatory h-[100svh] overflow-y-scroll scroll-smooth">
-        {/* ===== HERO full-screen ===== */}
+      {/* ===== SCROLLER ÚNICO ===== */}
+      <main className="app-scroll snap-y snap-mandatory h-[100svh] overflow-y-scroll scroll-smooth">
+        {/* ===== HERO ===== */}
         <section
           ref={heroRef}
+          onMouseMove={handleMouse}
           className="relative h-[100svh] snap-start flex items-center justify-center overflow-hidden"
         >
-          {/* aurora background */}
+          {/* aurora */}
           <div className="hero-aurora"><div /></div>
 
-          {/* conteúdo */}
-          <motion.div style={{ y: lift }} className="relative z-10 text-center px-6 pt-20">
-            <motion.h1
-              variants={fadeUp}
-              initial="hidden"
-              animate="show"
-              className="text-4xl sm:text-6xl font-extrabold tracking-tight brand-text"
-            >
+          {/* parallax camadas */}
+          <motion.div aria-hidden className="pointer-events-none absolute inset-0 z-0" style={{ x: rBackX, y: sBackY }}>
+            <div className="absolute inset-0 opacity-30 [background-image:radial-gradient(1px_1px_at_20%_30%,_rgba(255,255,255,.6),transparent_60%),radial-gradient(1px_1px_at_70%_60%,_rgba(255,255,255,.4),transparent_60%),radial-gradient(1px_1px_at_40%_80%,_rgba(255,255,255,.5),transparent_60%)] [background-size:260px_260px]" />
+          </motion.div>
+          <motion.div aria-hidden className="pointer-events-none absolute -inset-x-[10vw] -inset-y-[8vh] z-0 blur-2xl" style={{ x: rMidX, y: sMidY }}>
+            <div className="absolute w-[36vw] h-[36vw] -left-[6vw] top-[10vh] rounded-full opacity-40" style={{ background: "radial-gradient(circle at 30% 30%, rgba(99,102,241,.55), transparent 60%)" }} />
+            <div className="absolute w-[32vw] h-[32vw] right-[2vw] top-[20vh] rounded-full opacity-35" style={{ background: "radial-gradient(circle at 60% 40%, rgba(139,92,246,.50), transparent 60%)" }} />
+            <div className="absolute w-[40vw] h-[40vw] left-1/2 -translate-x-1/2 bottom-[6vh] rounded-full opacity-30" style={{ background: "radial-gradient(circle at 50% 50%, rgba(217,70,239,.45), transparent 65%)" }} />
+          </motion.div>
+          <motion.div aria-hidden className="pointer-events-none absolute inset-0 z-0" style={{ x: rFrontX, y: sFrontY }}>
+            <div className="absolute left-[10%] top-[22%] w-24 h-24 rounded-full border border-indigo-400/30" />
+            <div className="absolute right-[12%] top-[30%] w-16 h-16 rounded-full border border-fuchsia-400/30" />
+            <div className="absolute left-[22%] bottom-[18%] w-10 h-10 rotate-6 rounded-[12px] border border-violet-400/30" />
+          </motion.div>
+
+          {/* conteúdo hero */}
+          <motion.div style={{ y: lift }} className="relative z-10 text-center px-6 pt-24">
+            <motion.h1 variants={fadeUp} initial="hidden" animate="show" className="text-[2.65rem] leading-[1.05] sm:text-[3.75rem] sm:leading-[1.05] font-extrabold tracking-tight brand-text">
               Aprende mais, melhor.
             </motion.h1>
-
-            <motion.p
-              variants={fadeUp}
-              custom={1}
-              initial="hidden"
-              animate="show"
-              className="mt-4 max-w-2xl mx-auto text-muted-foreground"
-            >
-              Acompanhamento real, planos personalizados e resultados visíveis.
+            <motion.p variants={fadeUp} custom={1} initial="hidden" animate="show" className="mt-4 max-w-2xl mx-auto text-[1.05rem] sm:text-lg text-muted-foreground">
+              Acompanho-te de forma real, com planos personalizados e resultados visíveis.
             </motion.p>
-
-            {/* quadrado de scroll — muito pequeno, MESMO no fundo centrado */}
-<button
-  onClick={() => scrollToId("sobre")}
-  className="group absolute left-1/2 -translate-x-1/2 bottom-[2px] sm:bottom-[6px] grid place-items-center"
-  aria-label="Scroll para a próxima secção"
-  title="Desliza"
->
-  <span
-    className="block h-2 w-2 rounded-[4px] border border-primary/60 bg-primary/30 group-hover:bg-primary/50 transition"
-    style={{ animation: "pulseRing 2.4s ease-out infinite" }}
-  />
-  <ChevronDown className="h-4 w-4 mt-1 text-muted-foreground group-hover:text-primary transition" />
-</button>
-
           </motion.div>
+
+          {/* botão fundo */}
+          <button
+            onClick={() => scrollToId("sobre")}
+            className="group absolute z-10 left-1/2 -translate-x-1/2 bottom-[6px] sm:bottom-[10px] grid place-items-center"
+            aria-label="Scroll para a próxima secção"
+            title="Desliza"
+          >
+            <span className="block h-2 w-2 rounded-[4px] border border-primary/60 bg-primary/30 group-hover:bg-primary/50 transition" style={{ animation: "pulseRing 2.4s ease-out infinite" }} />
+            <ChevronDown className="h-4 w-4 mt-1 text-muted-foreground group-hover:text-primary transition" />
+          </button>
         </section>
 
-        {/* ===== SOBRE ===== */}
-        <section id="sobre" className="relative min-h-[100svh] snap-start grid place-items-center py-16">
-          <div className="mx-auto max-w-6xl px-4 grid md:grid-cols-2 gap-10 items-center">
-            {/* Coluna esquerda (texto) */}
-            <motion.div variants={fadeUp} initial="hidden" whileInView="show" viewport={{ once: true }}>
-              <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-primary">
-                <Sparkles className="h-4 w-4" /> Sobre o Centro
-              </div>
-              <h2 className="mt-2 text-3xl sm:text-4xl font-extrabold tracking-tight brand-text">
-                Metodologia prática, acompanhamento real
-              </h2>
-              <p className="mt-3 text-muted-foreground">
-                Espaço onde todos podem aprender e ensinar, através da parttilha de saberes, esperiências e conhecimentos.
-              </p>
-              <ul className="mt-6 grid gap-3 text-sm">
-                {[
-                  "Ensino personalizado e centrado no aluno",
-                  "Foco na compreensão, não na memorização",
-                  "Feedback contínuo a alunos e encarregados",
-                  "Preparação de testes e exames (com simulações)",
-                ].map((t, i) => (
-                  <motion.li
-                    key={t}
-                    custom={i}
-                    variants={fadeUp}
-                    initial="hidden"
-                    whileInView="show"
-                    viewport={{ once: true }}
-                    className="flex items-start gap-3 rounded-lg border p-3 bg-background/60"
-                  >
-                    <span className="mt-0.5 h-2 w-2 rounded-full bg-primary" />
-                    <span>{t}</span>
-                  </motion.li>
-                ))}
-              </ul>
-              <div className="mt-6 flex gap-3">
-                <Button onClick={() => scrollToId("servicos")}>Ver serviços</Button>
-                <Button asChild variant="outline">
-  <a href="https://www.arvoreconhecimento.com/auth" target="_blank" rel="noopener noreferrer">
-    Entrar na área reservada
-  </a>
-</Button>
+        {/* ===== SOBRE (−10%) ===== */}
+        <section id="sobre" className="relative min-h-[100svh] snap-start grid place-items-center py-14">
+          <div className="mx-auto max-w-6xl px-4">
+            <div className="scale-[0.9] origin-center">
+              <div className="grid md:grid-cols-2 gap-8 items-center">
+                <motion.div variants={fadeUp} initial="hidden" whileInView="show" viewport={{ once: true }}>
+                  <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-primary">
+                    <Sparkles className="h-4 w-4" /> Sobre o Centro
+                  </div>
+                  <h2 className="mt-4 text-3xl sm:text-4xl font-extrabold tracking-tight brand-text">
+                    Metodologia prática, acompanhamento real
+                  </h2>
+                  <p className="mt-4 text-muted-foreground">
+                    Espaço onde todos podem aprender e ensinar, através da partilha de saberes, experiências e conhecimentos.
+                  </p>
+                  <ul className="mt-6 grid gap-3 text-sm">
+                    {[
+                      "Ensino personalizado e centrado no aluno",
+                      "Foco na compreensão, não na memorização",
+                      "Feedback contínuo a alunos e encarregados",
+                      "Preparação de testes e exames (com simulações)",
+                    ].map((t, i) => (
+                      <motion.li
+                        key={t}
+                        custom={i}
+                        variants={fadeUp}
+                        initial="hidden"
+                        whileInView="show"
+                        viewport={{ once: true }}
+                        className="flex items-start gap-3 rounded-lg border p-3 bg-background/60"
+                      >
+                        <span className="mt-0.5 h-2 w-2 rounded-full bg-primary" />
+                        <span>{t}</span>
+                      </motion.li>
+                    ))}
+                  </ul>
+                  <div className="mt-6 flex gap-3">
+                    <Button onClick={() => scrollToId("servicos")}>Ver serviços</Button>
+                    <Button asChild variant="outline">
+                      <a href="https://www.arvoreconhecimento.com/auth" target="_blank" rel="noopener noreferrer">
+                        Entrar na área reservada
+                      </a>
+                    </Button>
+                  </div>
+                </motion.div>
 
+                <motion.div variants={fadeUp} custom={1} initial="hidden" whileInView="show" viewport={{ once: true }} className="relative">
+                  <div className="relative w-full max-w-[560px] mx-auto">
+                    <div className="aspect-[4/3] rounded-2xl overflow-hidden border bg-gradient-to-br from-indigo-400/15 via-violet-400/15 to-fuchsia-400/15 card-glow" />
+                    <motion.img
+                      src={aboutImgUrl}
+                      alt="O nosso centro"
+                      whileHover={{ y: -2, rotate: -0.5 }}
+                      transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                      className="absolute -left-6 top-8 w-[88%] aspect-[4/3] object-cover rounded-xl border shadow-xl bg-background"
+                    />
+                  </div>
+                </motion.div>
               </div>
-            </motion.div>
-
-            {/* Coluna direita (imagem deslocada sobre quadrado) */}
-            <motion.div
-              variants={fadeUp}
-              custom={1}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true }}
-              className="relative"
-            >
-              <div className="relative w-full max-w-[560px] mx-auto">
-                {/* QUADRADO colorido por baixo */}
-                <div className="aspect-[4/3] rounded-2xl overflow-hidden border bg-gradient-to-br from-indigo-400/15 via-violet-400/15 to-fuchsia-400/15 card-glow" />
-                {/* FOTO deslocada para baixo e esquerda */}
-                <motion.img
-                  src={aboutImgUrl}
-                  alt="O nosso centro"
-                  whileHover={{ y: -2, rotate: -0.5 }}
-                  transition={{ type: "spring", stiffness: 200, damping: 20 }}
-                  className="
-                    absolute -left-6 top-8
-                    w-[88%] aspect-[4/3] object-cover
-                    rounded-xl border shadow-xl bg-background
-                  "
-                />
-              </div>
-            </motion.div>
+            </div>
           </div>
         </section>
 
-        {/* ===== FUNDADORAS ===== */}
+        {/* ===== FUNDADORAS (sem fotos) ===== */}
         <section id="fundadoras" className="relative min-h-[100svh] snap-start grid place-items-center py-16 bg-gradient-to-b from-transparent to-muted/30">
           <div className="w-full mx-auto max-w-6xl px-4">
             <div className="text-center">
@@ -291,20 +352,8 @@ export default function Landing() {
 
             <div className="mt-8 grid sm:grid-cols-2 gap-5 place-items-center">
               {[
-                {
-                  name: "Margarida",
-                  role: "Co-fundadora · Matemática",
-                  img: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=800&auto=format&fit=crop",
-                  bio: "15 anos a preparar alunos para exames nacionais.",
-                  links: { linkedin: "#", instagram: "#" },
-                },
-                {
-                  name: "Sílvia",
-                  role: "Co-fundadora · Línguas & Estudo",
-                  img: "https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?q=80&w=800&auto=format&fit=crop",
-                  bio: "Técnicas de estudo e organização para resultados sustentáveis.",
-                  links: { linkedin: "#", instagram: "#" },
-                },
+                { name: "Margarida", role: "Co-fundadora · Matemática", bio: "15 anos a preparar alunos para exames nacionais.", links: { linkedin: "#", instagram: "#" } },
+                { name: "Sílvia", role: "Co-fundadora · Línguas & Estudo", bio: "Técnicas de estudo e organização para resultados sustentáveis.", links: { linkedin: "#", instagram: "#" } },
               ].map((f, i) => (
                 <motion.div
                   key={i}
@@ -315,9 +364,6 @@ export default function Landing() {
                   viewport={{ once: true }}
                   className="relative w-full max-w-sm overflow-hidden rounded-xl border bg-card"
                 >
-                  {/* <div className="aspect-[5/4] overflow-hidden">
-                    <img src={f.img} alt={f.name} className="h-full w-full object-cover transition duration-500 hover:scale-105" />
-                  </div> */}
                   <div className="p-4">
                     <div className="flex items-center justify-between">
                       <div className="text-left">
@@ -349,9 +395,7 @@ export default function Landing() {
                 <Sparkles className="h-4 w-4" /> Serviços
               </div>
               <h2 className="mt-2 text-3xl font-extrabold tracking-tight brand-text">Tudo para subir de nível</h2>
-              <p className="mt-2 text-muted-foreground">
-                Formatos presenciais e online — simples e flexíveis.
-              </p>
+              <p className="mt-2 text-muted-foreground">Formatos presenciais e online — simples e flexíveis.</p>
             </div>
 
             <div className="mt-8 grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -400,7 +444,17 @@ export default function Landing() {
             <div className="relative mt-10 overflow-hidden">
               <div className="pointer-events-none absolute left-0 top-0 h-full w-24 bg-gradient-to-r from-background to-transparent" />
               <div className="pointer-events-none absolute right-0 top-0 h-full w-24 rotate-180 bg-gradient-to-r from-background to-transparent" />
-              <div className="whitespace-nowrap [animation:marquee_22s_linear_infinite] will-change-transform">
+
+              {/* Marquee com duração dinâmica */}
+              <motion.div
+                className="whitespace-nowrap will-change-transform"
+                style={{
+                  animationName: "marquee",
+                  animationTimingFunction: "linear",
+                  animationIterationCount: "infinite",
+                  animationDuration: marqueeDurCss,
+                }}
+              >
                 {[...partners, ...partners].map((p, i) => (
                   <span
                     key={i}
@@ -411,100 +465,154 @@ export default function Landing() {
                     <span className="text-base font-medium text-foreground">{p.name}</span>
                   </span>
                 ))}
-              </div>
+              </motion.div>
             </div>
           </div>
         </section>
 
-        {/* ===== CONTACTOS ===== */}
-        <section id="contactos" className="relative min-h-[100svh] snap-start grid place-items-center py-16">
-          <div className="w-full mx-auto max-w-6xl px-4 grid lg:grid-cols-2 gap-6">
-            <motion.div variants={fadeUp} initial="hidden" whileInView="show" viewport={{ once: true }} className="rounded-2xl border bg-card p-5">
-              <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-primary">
-                <Sparkles className="h-4 w-4" /> Contactos
-              </div>
-              <h2 className="mt-2 text-2xl font-bold brand-text">Fala connosco</h2>
-              <div className="mt-4 grid gap-4 text-sm">
-                <div className="flex items-start gap-3">
-                  <MapPin className="h-4 w-4 text-primary mt-0.5" />
+        {/* ===== CONTACTOS (−20%) + Footer integrado ===== */}
+        <section
+          id="contactos"
+          className="relative min-h-[100svh] snap-start grid place-items-center pt-20 pb-12"
+        >
+          <div className="mx-auto max-w-6xl px-4">
+            <div className="scale-[0.9] origin-center">
+              <div className="grid lg:grid-cols-2 gap-6">
+                {/* Card info (menos padding) */}
+                <motion.div variants={fadeUp} initial="hidden" whileInView="show" viewport={{ once: true }} className="rounded-2xl border bg-card p-4">
+                  <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-primary">
+                    <Sparkles className="h-4 w-4" /> Contactos
+                  </div>
+                  <h2 className="mt-4 text-xl font-bold brand-text">Fala connosco</h2>
+                  <div className="mt-3 grid gap-3 text-sm">
+                    <div className="flex items-start gap-3">
+                      <MapPin className="h-4 w-4 text-primary mt-0.5" />
+                      <div>
+                        <div className="font-medium">Rio Maior</div>
+                        <div className="text-muted-foreground">Rua Dr. Augusto Pedro Branco, n° 5B</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Phone className="h-4 w-4 text-primary" />
+                      <a href="tel:+351961941388" className="hover:underline">+351 961 941 388</a>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Mail className="h-4 w-4 text-primary" />
+                      <a href="mailto:arvoreconhecimento.rm@gmail.com" className="hover:underline">arvoreconhecimento.rm@gmail.com</a>
+                    </div>
+                    <div className="pt-1.5">
+                      <Button size="sm" asChild>
+                        <a href="mailto:apoio@arvoredoconhecimento.pt">Enviar email</a>
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+
+                {/* Form (Supabase) - menos padding */}
+                <motion.form
+                  variants={fadeUp}
+                  custom={1}
+                  initial="hidden"
+                  whileInView="show"
+                  viewport={{ once: true }}
+                  className="rounded-2xl border bg-card p-4 grid gap-3"
+                  onSubmit={submitContact}
+                >
+                  {/* honeypot */}
+                  <label className="absolute left-[-9999px] top-auto w-px h-px overflow-hidden">
+                    Website
+                    <input
+                      tabIndex={-1}
+                      autoComplete="off"
+                      value={form.website}
+                      onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))}
+                    />
+                  </label>
+
                   <div>
-                    <div className="font-medium">Rio Maior</div>
-                    <div className="text-muted-foreground">Rua Dr. Augusto Pedro Branco, n° 5B</div>
+                    <label className="text-sm font-medium">Nome</label>
+                    <input
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                      required
+                      value={form.name}
+                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm font-medium">Email</label>
+                      <input
+                        type="email"
+                        className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                        required
+                        value={form.email}
+                        onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Telefone</label>
+                      <input
+                        className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                        value={form.phone}
+                        onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Mensagem</label>
+                    <textarea
+                      className="mt-1 w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2"
+                      required
+                      value={form.message}
+                      onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1.5">
+                    <span className="text-xs text-muted-foreground">
+                      Respondemos no próprio dia útil.
+                    </span>
+                    <Button type="submit" disabled={status === "sending"}>
+                      {status === "sending" ? "A enviar..." : "Enviar"}
+                    </Button>
+                  </div>
+
+                  {status === "success" && (
+                    <p className="text-xs text-green-600 mt-1">Obrigado! Mensagem enviada com sucesso.</p>
+                  )}
+                  {status === "error" && (
+                    <p className="text-xs text-red-600 mt-1">{errorMsg ?? "Ocorreu um erro."}</p>
+                  )}
+                  {errorMsg && status !== "error" && (
+                    <p className="text-xs text-red-600 mt-1">{errorMsg}</p>
+                  )}
+                </motion.form>
+              </div>
+
+              {/* Footer integrado */}
+              <div className="w-full border-t mt-8">
+                <div className="mx-auto max-w-6xl px-2 sm:px-4 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <img src={logoUrl} alt="Logo" className="h-6 w-auto" />
+                    <span className="text-sm text-muted-foreground brand-text">
+                      © {new Date().getFullYear()} Árvore do Conhecimento
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <a className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition" href="#servicos">Serviços</a>
+                    <a className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition" href="#parcerias">Parcerias</a>
+                    <a className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition" href="#contactos">Contactos</a>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Phone className="h-4 w-4 text-primary" />
-                  <a href="tel:+351961941388" className="hover:underline">+351 961 941 388</a>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Mail className="h-4 w-4 text-primary" />
-                  <a href="mailto:arvoreconhecimento.rm@gmail.com" className="hover:underline">
-                    arvoreconhecimento.rm@gmail.com
-                  </a>
-                </div>
-                <div className="pt-2">
-                  <Button size="lg" asChild>
-                    <a href="mailto:apoio@arvoredoconhecimento.pt">Enviar email</a>
-                  </Button>
-                </div>
               </div>
-            </motion.div>
-
-            <motion.form
-              variants={fadeUp}
-              custom={1}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true }}
-              className="rounded-2xl border bg-card p-5 grid gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                window.location.href = "mailto:arvoreconhecimento.rm@gmail.com";
-              }}
-            >
-              <div>
-                <label className="text-sm font-medium">Nome</label>
-                <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" required />
-              </div>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-sm font-medium">Email</label>
-                  <input type="email" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" required />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Telefone</label>
-                  <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" />
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium">Mensagem</label>
-                <textarea className="mt-1 w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2" required />
-              </div>
-              <div className="flex items-center justify-between pt-2">
-                <span className="text-xs text-muted-foreground">Respondemos no próprio dia útil.</span>
-                <Button type="submit">Enviar</Button>
-              </div>
-            </motion.form>
+            </div>
           </div>
         </section>
       </main>
 
-      {/* ===== FOOTER com logo ===== */}
-      <footer className="border-t">
-        <div className="mx-auto max-w-6xl px-4 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <img src={logoUrl} alt="Logo" className="h-6 w-auto" />
-            <span className="text-sm text-muted-foreground brand-text">
-              © {new Date().getFullYear()} Árvore do Conhecimento
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <a className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition" href="#servicos">Serviços</a>
-            <a className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition" href="#parcerias">Parcerias</a>
-            <a className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition" href="#contactos">Contactos</a>
-          </div>
-        </div>
-      </footer>
+      {/* ===== Vercel Analytics + Speed Insights ===== */}
+      <Analytics />
+      <SpeedInsights />
     </div>
   );
 }
