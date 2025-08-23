@@ -21,6 +21,18 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+/* ──────────────────────────────────────────────────────────────
+   PDF viewer (react-pdf-viewer)
+---------------------------------------------------------------- */
+import { Viewer, Worker } from "@react-pdf-viewer/core";
+import { pageNavigationPlugin } from "@react-pdf-viewer/page-navigation";
+import { zoomPlugin } from "@react-pdf-viewer/zoom";
+import { fullScreenPlugin } from "@react-pdf-viewer/full-screen";
+import "@react-pdf-viewer/core/lib/styles/index.css";
+import "@react-pdf-viewer/page-navigation/lib/styles/index.css";
+import "@react-pdf-viewer/zoom/lib/styles/index.css";
+import "@react-pdf-viewer/full-screen/lib/styles/index.css";
+
 // ------------------- Tipos -------------------
 type Student = { name: string; year: string };
 
@@ -64,17 +76,29 @@ const isValidPhone = (p: string) => {
   return /^\+?[1-9]\d{7,14}$/.test(s) || /^9\d{8}$/.test(s) || /^2\d{8}$/.test(s);
 };
 
+// ✔️ Validação NIF local (módulo 11)
+const isValidNIFLocal = (nif: string) => {
+  if (!NIF_DIGITS.test(nif)) return false;
+  if (!/[1235689]/.test(nif[0])) return false;
+  const digits = nif.split("").map(Number);
+  let sum = 0;
+  for (let i = 0; i < 8; i++) sum += digits[i] * (9 - i);
+  const mod = sum % 11;
+  const check = mod < 2 ? 0 : 11 - mod;
+  return digits[8] === check;
+};
+
 // ------------------- Componente -------------------
 export default function Setup() {
   const navigate = useNavigate();
 
-  // wizard: 0=password, 1=billing, 2=stripe (opcional), 3=students
-  const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
+  // wizard: 0=password, 1=billing, 2=stripe (opcional), 3=students, 4=regulamento
+  const [step, setStep] = useState<0 | 1 | 2 | 3 | 4>(0);
   const [loading, setLoading] = useState(false);
   const [bootLoading, setBootLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // step 0 — password + telefone
+  // step 0 — password + telefone + opção de recibo (novo)
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordStrength, setPasswordStrength] = useState(0);
@@ -88,12 +112,13 @@ export default function Setup() {
   const [codeInput, setCodeInput] = useState("");
   const [phoneVerified, setPhoneVerified] = useState(false);
 
-  // step 1 — faturação (sem email / sem IBAN)
+  // passo 1 — faturação
+  const [wantsReceipt, setWantsReceipt] = useState<boolean>(true);
   const [billingInfo, setBillingInfo] = useState({
     full_name: "",
     tax_number: "",
     address: "", // artéria / morada base
-    address_name: "", // complemento opcional (Lote/Bloco)
+    address_name: "", // complemento
     postal_code: "",
     city: "",
     country: "Portugal",
@@ -102,10 +127,8 @@ export default function Setup() {
   // step 2 — stripe (opcional)
   const [stripeSetup, setStripeSetup] = useState<"not_started" | "pending" | "done">("not_started");
 
-  // NIF validation (informativo)
-  const [nifChecking, setNifChecking] = useState(false);
+  // NIF validation (local, informativo)
   const [nifValid, setNifValid] = useState<boolean | null>(null);
-  const [nifQuotaExceeded, setNifQuotaExceeded] = useState(false);
 
   // CP → artérias
   const [cpLoading, setCpLoading] = useState(false);
@@ -118,6 +141,11 @@ export default function Setup() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [studentForm, setStudentForm] = useState<Student>({ name: "", year: "" });
 
+  // step 4 — regulamento (PDF)
+  const [pdfTotalPages, setPdfTotalPages] = useState(0);
+  const [pdfVisitedPages, setPdfVisitedPages] = useState<Set<number>>(new Set());
+  const hasCompletedPdf = pdfTotalPages > 0 && pdfVisitedPages.size >= pdfTotalPages;
+
   const planLimit = 3;
 
   // ------------------- UI helpers / animações -------------------
@@ -127,8 +155,8 @@ export default function Setup() {
     exit: { opacity: 0, y: -10, filter: "blur(4px)", transition: { duration: 0.25, ease: [0.4, 0, 1, 1] } },
   } as const;
 
-  // Barra de progresso animada
-  const progress = ((step + 1) / 4) * 100;
+  // Barra de progresso animada (5 passos)
+  const progress = ((step + 1) / 5) * 100;
 
   // password strength
   useEffect(() => {
@@ -196,6 +224,7 @@ export default function Setup() {
           if (loadedStudents.length > 0) setStudents(loadedStudents);
         }
 
+        // Decide passo inicial
         const billingOk =
           Boolean(
             (withBilling?.full_name || "").trim() &&
@@ -228,66 +257,13 @@ export default function Setup() {
     };
   }, []);
 
-  // Validação NIF (debounce) — informativo
+  // Validação NIF (local, com debounce leve)
   useEffect(() => {
-    const nif = billingInfo.tax_number.trim();
-    setNifValid(null);
-    setNifQuotaExceeded(false);
-    if (!NIF_DIGITS.test(nif)) return;
-
-    const t = setTimeout(async () => {
-      try {
-        setNifChecking(true);
-        const key = import.meta.env.VITE_NIF_API_KEY as string | undefined;
-        const base = `https://www.nif.pt/?json=1&q=${encodeURIComponent(nif)}`;
-        const url = key ? `${base}&key=${encodeURIComponent(key)}` : base;
-
-        const res = await fetch(url, { headers: { Accept: "application/json" } });
-
-        if (res.status === 429) {
-          setNifQuotaExceeded(true);
-          setNifValid(null);
-          return;
-        }
-        if (!res.ok) {
-          setNifValid(false);
-          return;
-        }
-
-        const json = await res.json();
-
-        const credits = json?.credits;
-        const limitHit =
-          res.status === 429 ||
-          (credits &&
-            (("left" in credits &&
-              ((typeof credits.left === "number" && credits.left <= 0) ||
-                (Array.isArray(credits.left) && credits.left.length === 0))) ||
-              (String(credits?.used || "").toLowerCase() === "free" &&
-                Array.isArray(credits?.left) &&
-                credits.left.length === 0)));
-
-        if (limitHit) {
-          setNifQuotaExceeded(true);
-          setNifValid(null);
-          return;
-        }
-
-        const resultOk = String(json?.result || "").toLowerCase() === "success";
-        const validationFlag = json?.nif_validation === true || json?.is_nif === true;
-        let recordMatch = false;
-        if (json?.records && typeof json.records === "object") {
-          recordMatch = Boolean(json.records[nif]) || Object.keys(json.records).length > 0;
-        }
-
-        setNifValid(resultOk && (validationFlag || recordMatch));
-      } catch {
-        setNifValid(false);
-      } finally {
-        setNifChecking(false);
-      }
-    }, 350);
-
+    const t = setTimeout(() => {
+      const raw = billingInfo.tax_number.trim();
+      if (!raw) return setNifValid(null);
+      setNifValid(isValidNIFLocal(raw));
+    }, 200);
     return () => clearTimeout(t);
   }, [billingInfo.tax_number]);
 
@@ -360,7 +336,7 @@ export default function Setup() {
 
   const handlePrev = () => {
     setError(null);
-    if (step > 0) setStep((s) => ((s - 1) as 0 | 1 | 2 | 3));
+    if (step > 0) setStep((s) => ((s - 1) as 0 | 1 | 2 | 3 | 4));
   };
 
   // ======== SMS / PHONE HELPERS ========
@@ -444,7 +420,7 @@ export default function Setup() {
   const handleNext = async () => {
     setError(null);
 
-    // STEP 0 → validar telefone; password é OPCIONAL (mantém a atual se deixares vazio)
+    // STEP 0 → validar telefone; password é OPCIONAL
     if (step === 0) {
       const wantsChangePassword = password.length > 0 || confirmPassword.length > 0;
 
@@ -470,7 +446,8 @@ export default function Setup() {
           const { error: passErr } = await supabase.auth.updateUser({ password });
           if (passErr) throw passErr;
         }
-        setStep(1);
+        // 👉 salto do passo de faturação se não quiser recibo
+        setStep(wantsReceipt ? 1 : 2);
       } catch (e: any) {
         setError(e?.message ?? "Erro ao atualizar a password.");
       } finally {
@@ -479,16 +456,22 @@ export default function Setup() {
       return;
     }
 
-    // STEP 1 → validar faturação (NIF informativo, nunca bloqueia)
+    // STEP 1 → se quer recibo, validar faturação; se não, pode avançar (não chega aqui se wantsReceipt=false)
     if (step === 1) {
-      const { full_name, tax_number, address, postal_code, city, country } = billingInfo;
-      if (!full_name || !tax_number || !address || !postal_code || !city || !country) {
-        setError("Preenche todos os campos obrigatórios.");
-        return;
-      }
-      if (!CP_REGEX.test(postal_code)) {
-        setError("Código postal inválido. Usa o formato 1234-567.");
-        return;
+      if (wantsReceipt) {
+        const { full_name, tax_number, address, postal_code, city, country } = billingInfo;
+        if (!full_name || !tax_number || !address || !postal_code || !city || !country) {
+          setError("Para emitir recibo, preenche todos os campos obrigatórios.");
+          return;
+        }
+        if (!CP_REGEX.test(postal_code)) {
+          setError("Código postal inválido. Usa o formato 1234-567.");
+          return;
+        }
+        if (!isValidNIFLocal(tax_number)) {
+          setError("NIF inválido.");
+          return;
+        }
       }
       setStep(2);
       return;
@@ -500,7 +483,7 @@ export default function Setup() {
       return;
     }
 
-    // STEP 3 → valida alunos e grava perfis (um por aluno) em `profiles`
+    // STEP 3 → valida alunos e grava perfis
     if (step === 3) {
       if (students.length === 0) {
         setError("Adiciona pelo menos um aluno.");
@@ -521,7 +504,10 @@ export default function Setup() {
         if (userErr) throw userErr;
         const guardianEmail = userResp.user?.email ?? "sem-email@exemplo.local";
 
-        const { tax_number, address, address_name, postal_code, city, country } = billingInfo;
+        const { tax_number, address, address_name, postal_code, city, country } = wantsReceipt
+          ? billingInfo
+          : { tax_number: "", address: "", address_name: "", postal_code: "", city: "", country: "" as string };
+
         const combinedAddress = [address, address_name].filter(Boolean).join(", ");
 
         const rows = students.map((s) => ({
@@ -533,9 +519,9 @@ export default function Setup() {
           address: combinedAddress,
           postal_code,
           city,
-          country: country || "Portugal",
+          country: (country || "Portugal") || null,
           stripe_mandate_status: stripeSetup,
-          setup_complete: true,
+          setup_complete: false,
         }));
 
         const { data: insertedProfiles, error: upsertErr } = await supabase
@@ -549,9 +535,37 @@ export default function Setup() {
           localStorage.setItem("active_profile_id", insertedProfiles[0].id);
         }
 
-        navigate("/aluno");
+        setStep(4);
       } catch (err: any) {
         setError(err?.message ?? "Erro ao guardar dados.");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // STEP 4 → Regulamento: só concluir se hasCompletedPdf
+    if (step === 4) {
+      if (!hasCompletedPdf) {
+        setError("Lê o regulamento até ao fim para poderes concluir.");
+        return;
+      }
+      setLoading(true);
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userId = sessionData?.session?.user?.id;
+        if (!userId) throw new Error("Sessão inválida.");
+
+        const { error: upErr } = await supabase
+          .from("profiles")
+          .update({ setup_complete: true })
+          .eq("auth_user_id", userId);
+
+        if (upErr) throw upErr;
+
+        navigate("/aluno");
+      } catch (e: any) {
+        setError(e?.message ?? "Não foi possível concluir a configuração.");
       } finally {
         setLoading(false);
       }
@@ -575,7 +589,7 @@ export default function Setup() {
       }
 
       if (data?.url) {
-        window.location.href = data.url; // redireciona para o Checkout (Setup Mode)
+        window.location.href = data.url;
         return;
       }
 
@@ -615,19 +629,26 @@ export default function Setup() {
 
   // UI helpers para NIF (apenas estilo)
   const nifClass =
-    nifChecking && !nifQuotaExceeded
-      ? "border-yellow-400"
-      : nifValid === true
+    nifValid === true
       ? "border-green-500"
       : nifValid === false
       ? "border-destructive"
       : "";
 
-  // Progresso — 4 passos
-  const steps = ["Password", "Faturação", "Pagamento", "Alunos"];
+  // Progresso — 5 passos
+  const steps = ["Password", "Faturação", "Pagamento", "Alunos", "Regulamento"];
+
+  // PDF plugins
+  const navPluginInstance = pageNavigationPlugin();
+  const zoomPluginInstance = zoomPlugin();
+  const fullPluginInstance = fullScreenPlugin();
+
+  // URL do Regulamento
+  const REGULAMENTO_URL =
+    "https://qzvikwxwvwmngbnyxpwr.supabase.co/storage/v1/object/sign/static/Regulamento_AC_2024-2025.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lODBjMDg3My1kM2U4LTQ5OWMtODczNy0xYWRlMDUwMGUxNGMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJzdGF0aWMvUmVndWxhbWVudG9fQUNfMjAyNC0yMDI1LnBkZiIsImlhdCI6MTc1NTkwNjE5NSwiZXhwIjoxNzg3NDQyMTk1fQ.k49Cp2NCcU74NGy7ilTEmrTp0sMb3wHR-26PJMPURV0";
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center relative p-4 overflow-hidden">
+    <div className="min-h-screen flex flex-col items-center justify-center relative p-3 sm:p-4 overflow-hidden">
       {/* Fundo animado */}
       <motion.div
         className="absolute inset-0 -z-10"
@@ -642,23 +663,23 @@ export default function Setup() {
       />
 
       {/* Barra de progresso */}
-      <div className="w-full max-w-3xl mb-6">
-        <div className="flex items-center justify-between gap-2 mb-2">
+      <div className="w-full max-w-full md:max-w-3xl mb-4 sm:mb-6">
+        <div className="flex items-center justify-between gap-1.5 sm:gap-2 mb-2">
           {steps.map((label, i) => (
             <div key={label} className={`flex-1 flex flex-col items-center ${step === i ? "text-primary" : "text-muted-foreground"}`}>
               <motion.div
                 layout
-                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold border-2 ${step >= i ? "border-primary bg-primary/10" : "border-border bg-muted/30"}`}
+                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-base font-bold border-2 ${step >= i ? "border-primary bg-primary/10" : "border-border bg-muted/30"}`}
               >
                 {i + 1}
               </motion.div>
-              <span className="text-xs mt-1">{label}</span>
+              <span className="text-[10px] sm:text-xs mt-1">{label}</span>
             </div>
           ))}
         </div>
-        <div className="h-2 w-full rounded-full bg-muted/30 overflow-hidden">
+        <div className="h-1.5 sm:h-2 w-full rounded-full bg-muted/30 overflow-hidden">
           <motion.div
-            className="h-2 bg-primary"
+            className="h-full bg-primary"
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
             transition={{ type: "spring", stiffness: 120, damping: 16 }}
@@ -667,12 +688,12 @@ export default function Setup() {
       </div>
 
       {/* Card principal */}
-      <motion.div layout className="max-w-3xl w-full">
+      <motion.div layout className="w-full max-w-full md:max-w-3xl">
         <Card className="w-full shadow-2xl border border-border rounded-2xl">
-          <CardHeader>
-            <CardTitle className="text-2xl font-bold text-primary">Configuração Inicial</CardTitle>
+          <CardHeader className="px-4 sm:px-6 py-4">
+            <CardTitle className="text-xl sm:text-2xl font-bold text-primary">Configuração Inicial</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 sm:px-6 pb-6">
             <AnimatePresence mode="wait">
               {step === 0 && (
                 <motion.form
@@ -681,18 +702,18 @@ export default function Setup() {
                   initial="hidden"
                   animate="visible"
                   exit="exit"
-                  className="flex flex-col gap-8"
+                  className="flex flex-col gap-6 sm:gap-8"
                   onSubmit={(e) => { e.preventDefault(); handleNext(); }}
                 >
                   {/* Password */}
-                  <motion.div layout className="flex flex-col gap-2 p-4 bg-muted/40 rounded-xl border border-border">
-                    <div className="flex items-center gap-2 font-semibold text-lg mb-2 text-primary">
+                  <motion.div layout className="flex flex-col gap-2 p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
+                    <div className="flex items-center gap-2 font-semibold text-base sm:text-lg mb-2 text-primary">
                       <Lock className="w-5 h-5" /> Definir Password
                     </div>
-                    <div className="text-xs text-muted-foreground -mt-2 mb-1">
+                    <div className="text-xs text-muted-foreground -mt-1 sm:-mt-2 mb-1">
                       (Opcional) Se deixares em branco, mantemos a password atual.
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       <div className="relative">
                         <Lock className="absolute left-2 top-2.5 w-4 h-4 text-muted-foreground" />
                         <Input
@@ -717,8 +738,8 @@ export default function Setup() {
                       </div>
                     </div>
                     {password.length > 0 && (
-                      <div className="flex items-center gap-2 mt-2">
-                        <div className="w-32 h-2 bg-muted/30 rounded-full">
+                      <div className="flex items-center gap-2 mt-1 sm:mt-2">
+                        <div className="w-28 sm:w-32 h-2 bg-muted/30 rounded-full">
                           <motion.div
                             className={`h-2 rounded-full ${
                               passwordStrength === 0
@@ -741,13 +762,29 @@ export default function Setup() {
                   </motion.div>
 
                   {/* Telefone + verificação */}
-                  <motion.div layout className="flex flex-col gap-3 p-4 bg-muted/40 rounded-xl border border-border">
-                    <div className="flex items-center gap-2 font-semibold text-lg text-primary">
-                      <Phone className="w-5 h-5" /> Verificação de Telemóvel
+                  <motion.div layout className="flex flex-col gap-3 p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 font-semibold text-base sm:text-lg text-primary">
+                        <Phone className="w-5 h-5" /> Verificação de Telemóvel
+                      </div>
+
+                      {/* 🔀 Switch Pretendo Recibo (controla salto do passo 1) */}
+                      <label className="inline-flex items-center cursor-pointer select-none">
+                        <span className="mr-2 text-xs sm:text-sm">Pretendo recibo</span>
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={wantsReceipt}
+                          onChange={(e) => setWantsReceipt(e.target.checked)}
+                        />
+                        <span className={`h-6 w-11 rounded-full p-1 transition ${wantsReceipt ? "bg-primary" : "bg-muted"}`}>
+                          <span className={`block h-4 w-4 bg-white rounded-full transition ${wantsReceipt ? "translate-x-5" : "translate-x-0"}`} />
+                        </span>
+                      </label>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="md:col-span-2 relative">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="sm:col-span-2 relative">
                         <Phone className="absolute left-2 top-2.5 w-4 h-4 text-muted-foreground" />
                         <Input
                           type="tel"
@@ -772,8 +809,8 @@ export default function Setup() {
                     </div>
 
                     {!phoneVerified && (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="md:col-span-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="sm:col-span-2">
                           <Input
                             type="text"
                             inputMode="numeric"
@@ -800,11 +837,17 @@ export default function Setup() {
                         Telemóvel verificado.
                       </motion.div>
                     )}
+
+                    <div className="text-[11px] sm:text-xs text-muted-foreground">
+                      {wantsReceipt
+                        ? "Vais preencher os dados de faturação no passo seguinte."
+                        : "Não queres recibo. Vamos saltar o passo de faturação."}
+                    </div>
                   </motion.div>
 
-                  {error && <div className="text-destructive text-sm mt-2">{error}</div>}
-                  <div className="flex justify-end mt-4">
-                    <Button type="submit" disabled={loading}>
+                  {error && <div className="text-destructive text-sm mt-1 sm:mt-2">{error}</div>}
+                  <div className="flex flex-col sm:flex-row sm:justify-end gap-2 mt-3">
+                    <Button type="submit" disabled={loading} className="w-full sm:w-auto">
                       Guardar e continuar <ArrowRight className="w-4 h-4 ml-2" />
                     </Button>
                   </div>
@@ -818,16 +861,32 @@ export default function Setup() {
                   initial="hidden"
                   animate="visible"
                   exit="exit"
-                  className="flex flex-col gap-8"
+                  className="flex flex-col gap-6 sm:gap-8"
                   onSubmit={(e) => { e.preventDefault(); handleNext(); }}
                 >
+                  {/* Cabeçalho faturação */}
+                  <div className="flex items-start sm:items-center justify-between gap-2 p-3 rounded-lg border bg-muted/30">
+                    <div className="text-sm">
+                      <div className="font-semibold text-primary">Dados de Faturação</div>
+                      <div className="text-muted-foreground">Preenche para emitir recibo.</div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="text-xs sm:text-sm"
+                      onClick={() => {
+                        // permitir voltar e desligar recibo rapidamente
+                        setWantsReceipt(false);
+                        setStep(2);
+                      }}
+                    >
+                      Não quero recibo
+                    </Button>
+                  </div>
+
                   <div className="flex flex-col md:flex-row gap-4">
                     {/* Dados de Faturação */}
-                    <motion.div layout className="flex-1 flex flex-col gap-3 p-4 bg-muted/40 rounded-xl border border-border">
-                      <div className="flex items-center gap-2 font-semibold text-lg mb-1 text-primary">
-                        <FileText className="w-5 h-5" /> Dados de Faturação
-                      </div>
-
+                    <motion.div layout className="flex-1 flex flex-col gap-3 p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
                       <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
                         {/* Nome (3) | NIF (3) */}
                         <div className="md:col-span-3 relative">
@@ -851,17 +910,13 @@ export default function Setup() {
                             required
                             className={`pl-8 ${nifClass}`}
                           />
-                          {!nifQuotaExceeded && (
-                            <div className="absolute right-2 top-2.5">
-                              {nifChecking ? (
-                                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70" />
-                              ) : nifValid === true ? (
-                                <CheckCircle className="h-4 w-4 text-green-600" />
-                              ) : nifValid === false ? (
-                                <XCircle className="h-4 w-4 text-red-600" />
-                              ) : null}
-                            </div>
-                          )}
+                          <div className="absolute right-2 top-2.5">
+                            {nifValid === true ? (
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                            ) : nifValid === false ? (
+                              <XCircle className="h-4 w-4 text-red-600" />
+                            ) : null}
+                          </div>
                         </div>
 
                         {/* CP (2) | Localidade (2, RO) | País (2, RO) */}
@@ -872,6 +927,7 @@ export default function Setup() {
                             placeholder="Código Postal (1234-567)"
                             value={billingInfo.postal_code}
                             onChange={(e) => setBillingInfo({ ...billingInfo, postal_code: e.target.value })}
+                            required
                           />
                         </div>
                         <div className="md:col-span-2">
@@ -954,24 +1010,26 @@ export default function Setup() {
                     {/* Preview pequena */}
                     <motion.div layout className="w-full md:w-64 shrink-0 h-fit flex flex-col gap-2 p-4 bg-background border border-border rounded-xl shadow">
                       <div className="font-semibold text-primary text-sm mb-1">Preview Fatura</div>
-                      <div className="text-xs text-muted-foreground">{billingInfo.full_name || "—"}</div>
-                      <div className="text-xs">NIF: {billingInfo.tax_number || "—"}</div>
-                      <div className="text-xs">
-                        Morada: {[billingInfo.address, billingInfo.address_name].filter(Boolean).join(", ") || "—"}
-                        {billingInfo.address && (billingInfo.postal_code || billingInfo.city || billingInfo.country) ? ", " : ""}
-                        {billingInfo.postal_code} {billingInfo.city}
-                        {billingInfo.city && billingInfo.country ? ", " : ""}
-                        {billingInfo.country}
-                      </div>
+                      <>
+                        <div className="text-xs text-muted-foreground">{billingInfo.full_name || "—"}</div>
+                        <div className="text-xs">NIF: {billingInfo.tax_number || "—"}</div>
+                        <div className="text-xs">
+                          Morada: {[billingInfo.address, billingInfo.address_name].filter(Boolean).join(", ") || "—"}
+                          {billingInfo.address && (billingInfo.postal_code || billingInfo.city || billingInfo.country) ? ", " : ""}
+                          {billingInfo.postal_code} {billingInfo.city}
+                          {billingInfo.city && billingInfo.country ? ", " : ""}
+                          {billingInfo.country}
+                        </div>
+                      </>
                     </motion.div>
                   </div>
 
-                  {error && <div className="text-destructive text-sm mt-2">{error}</div>}
-                  <div className="flex justify-between mt-2">
-                    <Button type="button" variant="outline" onClick={handlePrev}>
+                  {error && <div className="text-destructive text-sm mt-1 sm:mt-2">{error}</div>}
+                  <div className="flex flex-col sm:flex-row justify-between gap-2 mt-2">
+                    <Button type="button" variant="outline" onClick={handlePrev} className="w-full sm:w-auto">
                       <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
                     </Button>
-                    <Button type="submit" disabled={loading}>
+                    <Button type="submit" disabled={loading} className="w-full sm:w-auto">
                       Guardar e continuar <ArrowRight className="w-4 h-4 ml-2" />
                     </Button>
                   </div>
@@ -987,12 +1045,12 @@ export default function Setup() {
                   exit="exit"
                   className="flex flex-col gap-6"
                 >
-                  <div className="p-4 bg-muted/40 rounded-xl border border-border">
+                  <div className="p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
                     <div className="flex items-center justify-between">
                       <div className="space-y-1">
                         <div className="text-sm font-semibold text-primary">Débito Direto</div>
                         <p className="text-sm text-muted-foreground">
-                          Podes ligar o débito direto para simplificar pagamentos. {" "}
+                          Podes ligar o débito direto para simplificar pagamentos.{" "}
                           <span className="font-medium">Não vamos cobrar nada sem a tua autorização.</span>
                         </p>
                       </div>
@@ -1027,11 +1085,11 @@ export default function Setup() {
                   </div>
 
                   {error && <div className="text-destructive text-sm">{error}</div>}
-                  <div className="flex justify-between">
-                    <Button type="button" variant="outline" onClick={handlePrev}>
+                  <div className="flex flex-col sm:flex-row justify-between gap-2">
+                    <Button type="button" variant="outline" onClick={handlePrev} className="w-full sm:w-auto">
                       <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
                     </Button>
-                    <Button type="button" onClick={() => setStep(3)} disabled={loading}>
+                    <Button type="button" onClick={() => setStep(3)} disabled={loading} className="w-full sm:w-auto">
                       Continuar <ArrowRight className="w-4 h-4 ml-2" />
                     </Button>
                   </div>
@@ -1045,17 +1103,17 @@ export default function Setup() {
                   initial="hidden"
                   animate="visible"
                   exit="exit"
-                  className="flex flex-col gap-8"
+                  className="flex flex-col gap-6 sm:gap-8"
                 >
-                  <div className="flex flex-col gap-2 p-4 bg-muted/40 rounded-xl border border-border">
-                    <div className="flex items-center gap-2 font-semibold text-lg mb-2 text-primary">
+                  <div className="flex flex-col gap-2 p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
+                    <div className="flex items-center gap-2 font-semibold text-base sm:text-lg mb-2 text-primary">
                       <Users className="w-5 h-5" /> Alunos do Plano
                     </div>
-                    <div className="mb-2 text-sm text-muted-foreground">Limite do plano: {planLimit} alunos</div>
+                    <div className="mb-2 text-xs sm:text-sm text-muted-foreground">Limite do plano: {planLimit} alunos</div>
 
                     {students.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8">
-                        <div className="text-muted-foreground mb-2">Ainda não adicionaste nenhum aluno.</div>
+                      <div className="flex flex-col items-center justify-center py-6 sm:py-8">
+                        <div className="text-muted-foreground mb-2 text-sm">Ainda não adicionaste nenhum aluno.</div>
                         <Button variant="secondary" onClick={openAddStudent}>
                           Adicionar primeiro aluno
                         </Button>
@@ -1068,7 +1126,7 @@ export default function Setup() {
                             layout
                             initial={{ opacity: 0, y: 6 }}
                             animate={{ opacity: 1, y: 0 }}
-                            className="flex items-center gap-4 p-3 bg-background/80 hover:bg-background border border-border rounded-xl transition-shadow shadow-sm hover:shadow-md"
+                            className="flex items-center gap-3 sm:gap-4 p-3 bg-background/80 hover:bg-background border border-border rounded-xl transition-shadow shadow-sm hover:shadow-md"
                           >
                             <div className="flex-1">
                               <div className="font-medium flex items-center gap-2">
@@ -1099,14 +1157,14 @@ export default function Setup() {
                     )}
                   </div>
 
-                  {error && <div className="text-destructive text-sm mt-2">{error}</div>}
+                  {error && <div className="text-destructive text-sm mt-1 sm:mt-2">{error}</div>}
 
-                  <div className="flex justify-between mt-4">
-                    <Button type="button" variant="outline" onClick={handlePrev}>
+                  <div className="flex flex-col sm:flex-row justify-between gap-2 mt-2">
+                    <Button type="button" variant="outline" onClick={handlePrev} className="w-full sm:w-auto">
                       <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
                     </Button>
-                    <Button type="button" onClick={handleNext} disabled={loading}>
-                      Prosseguir para o painel <ArrowRight className="w-4 h-4 ml-2" />
+                    <Button type="button" onClick={handleNext} disabled={loading} className="w-full sm:w-auto">
+                      Prosseguir para o regulamento <ArrowRight className="w-4 h-4 ml-2" />
                     </Button>
                   </div>
 
@@ -1114,13 +1172,13 @@ export default function Setup() {
                   <AnimatePresence>
                     {showStudentModal && (
                       <motion.div
-                        className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+                        className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3 sm:p-4"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                       >
                         <motion.div
-                          className="bg-background rounded-xl p-6 shadow-xl w-full max-w-md border border-border"
+                          className="bg-background rounded-xl p-5 sm:p-6 shadow-xl w-full max-w-md border border-border"
                           initial={{ scale: 0.95, opacity: 0 }}
                           animate={{ scale: 1, opacity: 1 }}
                           exit={{ scale: 0.95, opacity: 0 }}
@@ -1129,7 +1187,7 @@ export default function Setup() {
                           <div className="font-semibold text-lg mb-4">
                             {editingIndex === null ? "Adicionar Aluno" : "Editar Aluno"}
                           </div>
-                          <div className="flex flex-col gap-4">
+                          <div className="flex flex-col gap-3 sm:gap-4">
                             <Input
                               type="text"
                               value={studentForm.name}
@@ -1152,7 +1210,7 @@ export default function Setup() {
                               <option value="Ensino Superior">Ensino Superior</option>
                             </select>
                           </div>
-                          <div className="flex justify-end gap-2 mt-6">
+                          <div className="flex justify-end gap-2 mt-5 sm:mt-6">
                             <Button variant="outline" onClick={() => setShowStudentModal(false)}>
                               Cancelar
                             </Button>
@@ -1164,6 +1222,61 @@ export default function Setup() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+                </motion.div>
+              )}
+
+              {step === 4 && (
+                <motion.div
+                  key="step4"
+                  variants={stepVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  className="flex flex-col gap-6"
+                >
+                  <div className="p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
+                    <div className="space-y-1">
+                      <div className="text-sm font-semibold text-primary">Regulamento Interno</div>
+                      <p className="text-sm text-muted-foreground">
+                        Lê o documento até ao fim. O botão de concluir desbloqueia quando tiveres visitado todas as páginas.
+                      </p>
+                    </div>
+
+                    <div className="mt-4 h-[60vh] md:h-[70vh] w-full border rounded-lg overflow-hidden bg-background">
+                      <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js">
+                        <Viewer
+                          fileUrl={REGULAMENTO_URL}
+                          plugins={[navPluginInstance, zoomPluginInstance, fullPluginInstance]}
+                          onDocumentLoad={(e: any) => {
+                            const total = e?.doc?.numPages ?? e?.numPages ?? 0;
+                            setPdfTotalPages(total);
+                            setPdfVisitedPages(new Set([0]));
+                          }}
+                          onPageChange={(e: any) => {
+                            const p = typeof e?.currentPage === "number" ? e.currentPage : 0;
+                            setPdfVisitedPages((prev) => {
+                              const next = new Set(prev);
+                              next.add(p);
+                              return next;
+                            });
+                          }}
+                        />
+                      </Worker>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-2">
+                      Páginas lidas: {pdfVisitedPages.size}/{pdfTotalPages || "—"}
+                    </div>
+                  </div>
+
+                  {error && <div className="text-destructive text-sm">{error}</div>}
+                  <div className="flex flex-col sm:flex-row justify-between gap-2">
+                    <Button type="button" variant="outline" onClick={handlePrev} className="w-full sm:w-auto">
+                      <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
+                    </Button>
+                    <Button type="button" onClick={handleNext} disabled={loading || !hasCompletedPdf} className="w-full sm:w-auto">
+                      Concluir e entrar <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

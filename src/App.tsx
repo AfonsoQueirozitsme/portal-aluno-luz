@@ -37,6 +37,7 @@ const ProfessorMensagens = lazy(() => import("./pages/professor/Mensagens"));
 const ProfessorAvaliacoes = lazy(() => import("./pages/professor/Avaliacoes"));
 const ProfessorPerfil = lazy(() => import("./pages/professor/Perfil"));
 const ProfessorAlunoRelatorio = lazy(() => import("./pages/professor/RelatorioAluno"));
+const ProfessorPos = lazy(() => import("./pages/professor/Pos"));
 
 // Other pages
 const ContaBloqueada = lazy(() => import("./pages/ContaBloqueada"));
@@ -128,7 +129,7 @@ export default function App() {
           <BrowserRouter>
             <Suspense fallback={<Loader />}>
               <Routes>
-                <Route path="/" element={<Index />} />
+                <Route path="/" element={<Landing />} />
 
                 <Route path="/aluno" element={<StudentLayout />}>
                   <Route index element={<Dashboard />} />
@@ -155,8 +156,9 @@ export default function App() {
                 <Route path="/conta-bloqueada" element={<ContaBloqueada />} />
                 <Route path="/manutencao" element={<EmManutencao />} />
                 <Route path="/recuperar-password" element={<Recuperar />} />
-                <Route path="/landing-page" element={<Landing />} />
                 <Route path="/setup" element={<Setup />} />
+                <Route path="/auth" element={<Index />} />
+
                 
 
                 {/* Professor Routes */}
@@ -170,6 +172,7 @@ export default function App() {
                   <Route path="avaliacoes" element={<ProfessorAvaliacoes />} />
                   <Route path="perfil" element={<ProfessorPerfil />} />
                   <Route path="alunos/:id" element={<ProfessorAlunoRelatorio />} />
+                  <Route path="pos" element={<ProfessorPos />} />
                 </Route>
 
                 <Route path="*" element={<NotFound />} />

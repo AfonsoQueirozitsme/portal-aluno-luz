@@ -17,12 +17,11 @@ import {
 } from "@/components/ui/select";
 import {
   ArrowLeft, Mail, Phone, MapPin, User, CreditCard, Save, Undo2,
-  Plus, Trash2, Calendar as CalIcon, Clock, RefreshCcw, X, Users, Tag, Check
+  Plus, Trash2, Calendar as CalIcon, Clock, RefreshCcw, X, Users, Tag
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { format } from "date-fns";
-import { pt } from "date-fns/locale";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 /* =======================
    CONSTANTES / HELPERS
@@ -97,19 +96,50 @@ const Pill = ({ children, tone = "default", title }: { children: any; tone?: "de
   );
 };
 
-type ScheduledLessonRow = {
+type ProfileLite = { id: string; full_name: string | null; phone: string | null };
+
+type BalanceOp = {
   id: string;
-  profile_id: string;
-  subject_id: string | null;
-  starts_at: string;   // ISO
-  ends_at: string;     // ISO
-  status: "scheduled" | "cancelled" | "completed" | "no_show";
-  room?: string | null;
-  subject?: { name: string } | null;
-  recurring?: { teacher: string | null } | null;
+  type: "credit" | "debit";
+  hours_delta: number;
+  amount_cents: number;
+  source: string | null;
+  order_id: string | null;
+  lesson_id: string | null;
+  note: string | null;
+  created_at: string;
 };
 
-type ProfileLite = { id: string; full_name: string | null; phone: string | null };
+type OrderRow = {
+  id: string;
+  status: string;
+  horas: number;
+  amount_cents: number;
+  created_at: string;
+  paid_at: string | null;
+};
+
+type DiscountRow = {
+  code: string;
+  name: string;
+  value: number; // percent (0-100)
+};
+
+/* ========= Validação NIF (Portugal) ========= */
+function validateNIF(nif?: string | null) {
+  if (!nif) return { ok: true, reason: "vazio" };
+  const d = String(nif).replace(/\D+/g, "");
+  if (d.length === 0) return { ok: true, reason: "vazio" };
+  if (d.length !== 9) return { ok: false, reason: "tamanho" };
+  // opcional: prefixos permitidos (1,2,3,5,6,8,9) — deixo só check-digit matemático
+  const nums = d.split("").map(n => parseInt(n, 10));
+  const check = nums[8];
+  const weights = [9,8,7,6,5,4,3,2];
+  const sum = weights.reduce((acc, w, i) => acc + w * nums[i], 0);
+  const mod = sum % 11;
+  const calc = mod < 2 ? 0 : 11 - mod;
+  return { ok: calc === check, reason: calc === check ? "ok" : "checksum" };
+}
 
 /* =======================
    COMPONENTE
@@ -152,6 +182,19 @@ export default function AlunoRelatorio() {
   });
   const [schedSaving, setSchedSaving] = useState(false);
   const [genSaving, setGenSaving] = useState(false);
+
+  // Faturação
+  const [ops, setOps] = useState<BalanceOp[]>([]);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [opsLoading, setOpsLoading] = useState(false);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+
+  // Discounts
+  const [discounts, setDiscounts] = useState<DiscountRow[]>([]);
+  const NO_DISCOUNT = "__NO_DISCOUNT__";
+
+  // Tabs
+  const [tab, setTab] = useState<"dados" | "agenda" | "faturacao">("dados");
 
   // Para apresentar tamanho do grupo e professor (via recurring)
   const [recMapById, setRecMapById] = useState<Map<string, any>>(new Map());
@@ -257,11 +300,15 @@ export default function AlunoRelatorio() {
         privacy_statistics: p.privacy_statistics ?? true,
         allow_pospago: p.allow_pospago ?? false,
         wants_receipt: p.wants_receipt ?? false,
+        discount: p.discount ?? null,
+
       });
 
+      // subjects
       const { data: subj } = await supabase.from("subjects").select("id, name").order("name", { ascending: true });
       if (alive && subj) setSubjects(subj as any[]);
 
+      // recorrentes
       const { data: rec } = await supabase
         .from("recurring_lessons")
         .select("*")
@@ -271,6 +318,17 @@ export default function AlunoRelatorio() {
       if (alive && rec) setRecurring(rec as any[]);
 
       await reloadScheduled(p.id, ym);
+
+      // discounts
+      const { data: disc } = await supabase
+        .from("discount")
+        .select("code,name,value")
+        .order("name", { ascending: true });
+      if (alive && disc) setDiscounts(disc as DiscountRow[]);
+
+      // finanças
+      await reloadFinance(p);
+
       setLoading(false);
     })();
     return () => { alive = false; };
@@ -314,6 +372,37 @@ export default function AlunoRelatorio() {
     }
   }
 
+  async function reloadFinance(p: any) {
+    if (!p?.auth_user_id) {
+      setOps([]);
+      setOrders([]);
+      return;
+    }
+    setOpsLoading(true);
+    setOrdersLoading(true);
+    try {
+      const [{ data: opsD }, { data: ordD }] = await Promise.all([
+        supabase
+          .from("balance_operations")
+          .select("id,type,hours_delta,amount_cents,source,order_id,lesson_id,note,created_at")
+          .eq("user_id", p.auth_user_id)
+          .order("created_at", { ascending: false })
+          .limit(200),
+        supabase
+          .from("orders")
+          .select("id,status,horas,amount_cents,created_at,paid_at")
+          .eq("user_id", p.auth_user_id)
+          .order("created_at", { ascending: false })
+          .limit(200),
+      ]);
+      setOps(opsD ?? []);
+      setOrders(ordD ?? []);
+    } finally {
+      setOpsLoading(false);
+      setOrdersLoading(false);
+    }
+  }
+
   /* ========= Guardar profile ========= */
 
   const setF = (k: string, v: any) => setDraft((d: any) => ({ ...d, [k]: v }));
@@ -345,6 +434,7 @@ export default function AlunoRelatorio() {
       privacy_statistics: profile.privacy_statistics ?? true,
       allow_pospago: profile.allow_pospago ?? false,
       wants_receipt: profile.wants_receipt ?? false,
+      discount: profile.discount ?? "",
     });
     setSaveMsg(null);
   };
@@ -393,6 +483,7 @@ export default function AlunoRelatorio() {
         privacy_statistics: !!draft.privacy_statistics,
         allow_pospago: !!draft.allow_pospago,
         wants_receipt: !!draft.wants_receipt,
+        discount: draft.discount || null,
         updated_at: new Date().toISOString(),
       };
 
@@ -410,11 +501,7 @@ export default function AlunoRelatorio() {
     }
   };
 
-  /* ========= Lógica de SALA (auto) =========
-     - Agrupa por (starts_at + subject_id + teacher)
-     - Se já existir grupo nessa hora com o mesmo professor/discip, usa a mesma sala
-     - Caso contrário, escolhe a primeira sala com ocupação < ROOM_CAPACITY
-     - Se a coluna `room` não existir em scheduled_lessons, ignoramos o write (catch) */
+  /* ========= Lógica de SALA (auto) ========= */
 
   type ExistingAtTime = { id: string; room?: string | null; subject_id?: string | null; source_recurring_id?: string | null; status?: string }[];
 
@@ -481,7 +568,7 @@ export default function AlunoRelatorio() {
         start_time: recAdd.start_time, // "HH:MM"
         duration_min: Number(recAdd.duration_min),
         teacher: recAdd.teacher || null,
-        room: recAdd.room || null, // opcional; não fixa a sala (a sala final é decidida ao agendar)
+        room: recAdd.room || null,
       };
       const { error } = await supabase.from("recurring_lessons").insert(payload);
       if (error) throw error;
@@ -529,7 +616,7 @@ export default function AlunoRelatorio() {
       const start = setDateTimeUTC(base, hh, mm);
       const end = new Date(start.getTime() + Number(schedAdd.duration_min) * 60 * 1000);
 
-      // sala automática (considera subject + teacher opcional)
+      // sala automática
       const chosenRoom = await chooseRoomFor(start.toISOString(), schedAdd.subject_id || null, schedAdd.teacher || null);
 
       const payload: any = {
@@ -541,7 +628,6 @@ export default function AlunoRelatorio() {
         status: "scheduled",
       };
 
-      // tentar guardar room se existir a coluna
       try {
         payload.room = chosenRoom;
       } catch {}
@@ -628,7 +714,6 @@ export default function AlunoRelatorio() {
           // sala automática olhando para existentes nessa hora (todas as profiles)
           const chosenRoom = await (async () => {
             const atTime = existingByTime[key] || [];
-            // tenta agrupar por disciplina + professor
             if (atTime.length) {
               const recIds = Array.from(new Set(atTime.map(x => x.source_recurring_id).filter(Boolean))) as string[];
               let recsById = new Map<string, any>();
@@ -636,7 +721,6 @@ export default function AlunoRelatorio() {
                 const { data: recs } = await supabase.from("recurring_lessons").select("id, teacher").in("id", recIds);
                 recsById = new Map((recs || []).map((r: any) => [r.id, r]));
               }
-              // tentar usar sala de um grupo já aberto (mesma disciplina + professor)
               const same = atTime.find(x =>
                 x.subject_id === rec.subject_id &&
                 ((x.source_recurring_id && recsById.get(x.source_recurring_id)?.teacher) ? (recsById.get(x.source_recurring_id)?.teacher === rec.teacher) : false) &&
@@ -644,7 +728,6 @@ export default function AlunoRelatorio() {
               );
               if (same?.room) return same.room;
 
-              // caso sem professor/sem match: tenta sala com capacidade
               const occ: Record<string, number> = {};
               for (const r of ROOMS) occ[r] = 0;
               for (const s of atTime) {
@@ -668,7 +751,6 @@ export default function AlunoRelatorio() {
           try { payload.room = chosenRoom; } catch {}
 
           inserts.push(payload);
-          // incrementa a ocupação localmente para a próxima iteração
           existingByTime[key] = existingByTime[key] || [];
           existingByTime[key].push({ id: "temp", room: chosenRoom, subject_id: rec.subject_id, source_recurring_id: rec.id, status: "scheduled" } as any);
         }
@@ -729,6 +811,16 @@ export default function AlunoRelatorio() {
     return acc;
   }, {});
 
+  const nifStatus = validateNIF(draft.tax_number);
+
+  const euro = (cents: number) => (cents === 0 ? "—" : `${(cents / 100).toFixed(2)} €`);
+
+  const sourceLabel = (s?: string | null) =>
+    s === "order" ? "Compra" :
+    s === "lesson_precharge" ? "Explicação (pré)" :
+    s === "lesson_poscharge" ? "Explicação (pós)" :
+    (s ?? "—");
+
   return (
     <div className="p-6 space-y-6">
       <Helmet>
@@ -753,6 +845,11 @@ export default function AlunoRelatorio() {
             <Pill tone="brand"><User className="h-3.5 w-3.5" /> @{profile.username}</Pill>
             {profile.year && <Pill tone="info">{profile.year}º ano</Pill>}
             {profile.city && <Pill><MapPin className="h-3.5 w-3.5" /> {profile.city}</Pill>}
+            {profile.discount && (
+              <Pill tone="success" title="Desconto ativo">
+                <Tag className="h-3.5 w-3.5" /> Desconto: {profile.discount}
+              </Pill>
+            )}
           </CardTitle>
           <CardDescription>Resumo do aluno e dados do encarregado de educação</CardDescription>
         </CardHeader>
@@ -785,412 +882,591 @@ export default function AlunoRelatorio() {
         </CardContent>
       </Card>
 
-      {/* Editar Profile */}
-      <Card className="glass-panel">
-        <CardHeader>
-          <CardTitle>Dados do Aluno</CardTitle>
-          <CardDescription>Atualiza as informações do aluno e preferências</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {saveMsg && <div className="text-sm text-emerald-600">{saveMsg}</div>}
-          {err && <div className="text-sm text-destructive">{err}</div>}
+      {/* ======= TABS ======= */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
+        <TabsList className="mb-2">
+          <TabsTrigger value="dados">Dados</TabsTrigger>
+          <TabsTrigger value="agenda">Agendamento</TabsTrigger>
+          <TabsTrigger value="faturacao"><CreditCard className="h-4 w-4 mr-1" /> Faturação</TabsTrigger>
+        </TabsList>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="md:col-span-2">
-              <label className="text-xs text-muted-foreground">Nome completo</label>
-              <Input value={draft.full_name} onChange={(e) => setF("full_name", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Username *</label>
-              <Input value={draft.username} onChange={(e) => setF("username", e.target.value)} />
-            </div>
+        {/* ---- TAB: DADOS ---- */}
+        <TabsContent value="dados">
+          {/* Editar Profile */}
+          <Card className="glass-panel">
+            <CardHeader>
+              <CardTitle>Dados do Aluno</CardTitle>
+              <CardDescription>Atualiza as informações do aluno e preferências</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {saveMsg && <div className="text-sm text-emerald-600">{saveMsg}</div>}
+              {err && <div className="text-sm text-destructive">{err}</div>}
 
-            <div>
-              <label className="text-xs text-muted-foreground">Email</label>
-              <Input value={draft.email} onChange={(e) => setF("email", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Telefone</label>
-              <Input value={draft.phone ?? ""} onChange={(e) => setF("phone", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Ano</label>
-              <Input
-                type="number" min={1} max={13}
-                value={draft.year ?? ""}
-                onChange={(e) => setF("year", e.target.value ? Number(e.target.value) : null)}
-              />
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-2">
+                  <label className="text-xs text-muted-foreground">Nome completo</label>
+                  <Input value={draft.full_name} onChange={(e) => setF("full_name", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Username *</label>
+                  <Input value={draft.username} onChange={(e) => setF("username", e.target.value)} />
+                </div>
 
-            <div>
-              <label className="text-xs text-muted-foreground">Género</label>
-              <Select value={draft.gender ?? ""} onValueChange={(v) => setF("gender", v || null)}>
-                <SelectTrigger><SelectValue placeholder="Seleciona" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="male">Masculino</SelectItem>
-                  <SelectItem value="female">Feminino</SelectItem>
-                  <SelectItem value="other">Outro / Prefere não dizer</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Email</label>
+                  <Input value={draft.email} onChange={(e) => setF("email", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Telefone</label>
+                  <Input value={draft.phone ?? ""} onChange={(e) => setF("phone", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Ano</label>
+                  <Input
+                    type="number" min={1} max={13}
+                    value={draft.year ?? ""}
+                    onChange={(e) => setF("year", e.target.value ? Number(e.target.value) : null)}
+                  />
+                </div>
 
-            <div>
-              <label className="text-xs text-muted-foreground">Data de Nascimento</label>
-              <Input
-                type="date"
-                value={draft.date_of_birth ?? ""}
-                onChange={(e) => setF("date_of_birth", e.target.value || null)}
-              />
-            </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Género</label>
+                  <Select value={draft.gender ?? ""} onValueChange={(v) => setF("gender", v || null)}>
+                    <SelectTrigger><SelectValue placeholder="Seleciona" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="male">Masculino</SelectItem>
+                      <SelectItem value="female">Feminino</SelectItem>
+                      <SelectItem value="other">Outro / Prefere não dizer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div>
-              <label className="text-xs text-muted-foreground">Nacionalidade</label>
-              <Select
-                value={draft.nationality ?? ""}
-                onValueChange={(v) => setF("nationality", v || null)}
-              >
-                <SelectTrigger><SelectValue placeholder="Seleciona nacionalidade" /></SelectTrigger>
-                <SelectContent>
-                  {NATIONALITIES.map((n) => (
-                    <SelectItem key={n.code} value={n.code}>{n.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Data de Nascimento</label>
+                  <Input
+                    type="date"
+                    value={draft.date_of_birth ?? ""}
+                    onChange={(e) => setF("date_of_birth", e.target.value || null)}
+                  />
+                </div>
 
-            <div className="md:col-span-2">
-              <label className="text-xs text-muted-foreground">Instituição de Ensino</label>
-              <Input value={draft.institution ?? ""} onChange={(e) => setF("institution", e.target.value)} />
-            </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Nacionalidade</label>
+                  <Select
+                    value={draft.nationality ?? ""}
+                    onValueChange={(v) => setF("nationality", v || null)}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Seleciona nacionalidade" /></SelectTrigger>
+                    <SelectContent>
+                      {NATIONALITIES.map((n) => (
+                        <SelectItem key={n.code} value={n.code}>{n.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="md:col-span-3">
-              <label className="text-xs text-muted-foreground">Necessidades Especiais</label>
-              <Textarea
-                placeholder="Ex.: Dislexia, DDAH, etc."
-                value={draft.special_needs ?? ""}
-                onChange={(e) => setF("special_needs", e.target.value)}
-              />
-            </div>
+                <div className="md:col-span-2">
+                  <label className="text-xs text-muted-foreground">Instituição de Ensino</label>
+                  <Input value={draft.institution ?? ""} onChange={(e) => setF("institution", e.target.value)} />
+                </div>
 
-            <div className="md:col-span-3">
-              <label className="text-xs text-muted-foreground">Notas / Outras Informações</label>
-              <Textarea
-                placeholder="Notas internas, preferências, observações…"
-                value={draft.notes ?? ""}
-                onChange={(e) => setF("notes", e.target.value)}
-              />
-            </div>
+                <div className="md:col-span-3">
+                  <label className="text-xs text-muted-foreground">Necessidades Especiais</label>
+                  <Textarea
+                    placeholder="Ex.: Dislexia, DDAH, etc."
+                    value={draft.special_needs ?? ""}
+                    onChange={(e) => setF("special_needs", e.target.value)}
+                  />
+                </div>
 
-            {/* Contacto / Faturação */}
-            <div>
-              <label className="text-xs text-muted-foreground">NIF</label>
-              <Input value={draft.tax_number ?? ""} onChange={(e) => setF("tax_number", e.target.value)} />
-            </div>
-            <div className="md:col-span-2">
-              <label className="text-xs text-muted-foreground">Morada</label>
-              <Input value={draft.address ?? ""} onChange={(e) => setF("address", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Código Postal</label>
-              <Input value={draft.postal_code ?? ""} onChange={(e) => setF("postal_code", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Cidade</label>
-              <Input value={draft.city ?? ""} onChange={(e) => setF("city", e.target.value)} />
-            </div>
+                <div className="md:col-span-3">
+                  <label className="text-xs text-muted-foreground">Notas / Outras Informações</label>
+                  <Textarea
+                    placeholder="Notas internas, preferências, observações…"
+                    value={draft.notes ?? ""}
+                    onChange={(e) => setF("notes", e.target.value)}
+                  />
+                </div>
 
-            {/* Finanças simples */}
-            <div>
-              <label className="text-xs text-muted-foreground">Saldo (€)</label>
-              <Input type="number" step="0.01" value={draft.saldo ?? ""} onChange={(e) => setF("saldo", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Horas</label>
-              <Input type="number" step="0.5" value={draft.horas ?? ""} onChange={(e) => setF("horas", e.target.value)} />
-            </div>
+                {/* Contacto / Faturação */}
+                <div>
+                  <label className="text-xs text-muted-foreground">NIF</label>
+                  <Input value={draft.tax_number ?? ""} onChange={(e) => setF("tax_number", e.target.value)} />
+                  {!!draft.tax_number && (
+                    <div className={`text-xs mt-1 ${nifStatus.ok ? "text-emerald-600" : "text-destructive"}`}>
+                      {nifStatus.ok ? "NIF válido" : "NIF inválido (dígitos ou checksum)"}
+                    </div>
+                  )}
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-xs text-muted-foreground">Morada</label>
+                  <Input value={draft.address ?? ""} onChange={(e) => setF("address", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Código Postal</label>
+                  <Input value={draft.postal_code ?? ""} onChange={(e) => setF("postal_code", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Cidade</label>
+                  <Input value={draft.city ?? ""} onChange={(e) => setF("city", e.target.value)} />
+                </div>
 
-            {/* Switches */}
-            <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
-              <label className="flex items-center justify-between rounded-full border px-3 py-2">
-                <span className="text-sm">Partilhar email</span>
-                <Switch checked={!!draft.privacy_share_email} onCheckedChange={(v) => setF("privacy_share_email", v)} />
-              </label>
-              <label className="flex items-center justify-between rounded-full border px-3 py-2">
-                <span className="text-sm">Partilhar telefone</span>
-                <Switch checked={!!draft.privacy_share_phone} onCheckedChange={(v) => setF("privacy_share_phone", v)} />
-              </label>
-              <label className="flex items-center justify-between rounded-full border px-3 py-2">
-                <span className="text-sm">Newsletter</span>
-                <Switch checked={!!draft.privacy_newsletter} onCheckedChange={(v) => setF("privacy_newsletter", v)} />
-              </label>
-              <label className="flex items-center justify-between rounded-full border px-3 py-2">
-                <span className="text-sm">Partilhar estatísticas</span>
-                <Switch checked={!!draft.privacy_statistics} onCheckedChange={(v) => setF("privacy_statistics", v)} />
-              </label>
-              <label className="flex items-center justify-between rounded-full border px-3 py-2">
-                <span className="text-sm">Permitir pós-pago</span>
-                <Switch checked={!!draft.allow_pospago} onCheckedChange={(v) => setF("allow_pospago", v)} />
-              </label>
-              <label className="flex items-center justify-between rounded-full border px-3 py-2">
-                <span className="text-sm">Pretende recibo/fatura</span>
-                <Switch checked={!!draft.wants_receipt} onCheckedChange={(v) => setF("wants_receipt", v)} />
-              </label>
-            </div>
-          </div>
+                {/* Finanças simples */}
+                <div>
+                  <label className="text-xs text-muted-foreground">Saldo (€)</label>
+                  <Input type="number" step="0.01" value={draft.saldo ?? ""} onChange={(e) => setF("saldo", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Horas</label>
+                  <Input type="number" step="0.5" value={draft.horas ?? ""} onChange={(e) => setF("horas", e.target.value)} />
+                </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={handleReset}>
-              <Undo2 className="h-4 w-4 mr-2" /> Repor
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              <Save className="h-4 w-4 mr-2" />
-              {saving ? "A guardar…" : "Guardar alterações"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+                {/* Switches */}
+                <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                  <label className="flex items-center justify-between rounded-full border px-3 py-2">
+                    <span className="text-sm">Partilhar email</span>
+                    <Switch checked={!!draft.privacy_share_email} onCheckedChange={(v) => setF("privacy_share_email", v)} />
+                  </label>
+                  <label className="flex items-center justify-between rounded-full border px-3 py-2">
+                    <span className="text-sm">Partilhar telefone</span>
+                    <Switch checked={!!draft.privacy_share_phone} onCheckedChange={(v) => setF("privacy_share_phone", v)} />
+                  </label>
+                  <label className="flex items-center justify-between rounded-full border px-3 py-2">
+                    <span className="text-sm">Newsletter</span>
+                    <Switch checked={!!draft.privacy_newsletter} onCheckedChange={(v) => setF("privacy_newsletter", v)} />
+                  </label>
+                  <label className="flex items-center justify-between rounded-full border px-3 py-2">
+                    <span className="text-sm">Partilhar estatísticas</span>
+                    <Switch checked={!!draft.privacy_statistics} onCheckedChange={(v) => setF("privacy_statistics", v)} />
+                  </label>
+                  <label className="flex items-center justify-between rounded-full border px-3 py-2">
+                    <span className="text-sm">Permitir pós-pago</span>
+                    <Switch checked={!!draft.allow_pospago} onCheckedChange={(v) => setF("allow_pospago", v)} />
+                  </label>
+                  <label className="flex items-center justify-between rounded-full border px-3 py-2">
+                    <span className="text-sm">Pretende recibo/fatura</span>
+                    <Switch checked={!!draft.wants_receipt} onCheckedChange={(v) => setF("wants_receipt", v)} />
+                  </label>
+                </div>
+              </div>
 
-      {/* Recorrentes */}
-      <Card className="glass-panel">
-        <CardHeader className="flex items-start justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <CalIcon className="h-5 w-5 text-primary" />
-              Aulas Recorrentes (semanais)
-            </CardTitle>
-            <CardDescription>Padrões que geram as agendadas do mês</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {recurring.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Sem recorrências definidas.</div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Dia</TableHead>
-                  <TableHead>Hora</TableHead>
-                  <TableHead>Duração</TableHead>
-                  <TableHead>Disciplina</TableHead>
-                  <TableHead>Professor</TableHead>
-                  <TableHead>Sala (sugerida)</TableHead>
-                  <TableHead className="w-20">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recurring.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell><Pill tone="default">{WEEKDAYS.find(w => w.value === r.weekday)?.label || r.weekday}</Pill></TableCell>
-                    <TableCell><Pill tone="brand">{r.start_time}</Pill></TableCell>
-                    <TableCell><Pill tone="info">{r.duration_min} min</Pill></TableCell>
-                    <TableCell>
-                      <Pill tone="default">
-                        {subjects.find(s => s.id === r.subject_id)?.name || "—"}
-                      </Pill>
-                    </TableCell>
-                    <TableCell><Pill tone="default">{r.teacher || "—"}</Pill></TableCell>
-                    <TableCell><Pill tone="default">{r.room || "—"}</Pill></TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="icon" onClick={() => removeRecurring(r.id)} title="Remover">
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={handleReset}>
+                  <Undo2 className="h-4 w-4 mr-2" /> Repor
+                </Button>
+                <Button onClick={handleSave} disabled={saving || (!nifStatus.ok && !!draft.tax_number)}>
+                  <Save className="h-4 w-4 mr-2" />
+                  {saving ? "A guardar…" : "Guardar alterações"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-          {/* Adicionar recorrente */}
-          <div className="grid grid-cols-1 md:grid-cols-7 gap-3 border rounded-xl p-3">
-            <div>
-              <label className="text-xs text-muted-foreground">Dia</label>
-              <Select
-                value={recAdd.weekday ? String(recAdd.weekday) : ""}
-                onValueChange={(v) => setRecAdd((d) => ({ ...d, weekday: v ? Number(v) : "" }))}
-              >
-                <SelectTrigger><SelectValue placeholder="Seleciona" /></SelectTrigger>
-                <SelectContent>
-                  {WEEKDAYS.map((w) => (<SelectItem key={w.value} value={String(w.value)}>{w.label}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Hora</label>
-              <Input type="time" value={recAdd.start_time} onChange={(e) => setRecAdd((d) => ({ ...d, start_time: e.target.value }))} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Duração (min)</label>
-              <Input type="number" value={recAdd.duration_min} onChange={(e) => setRecAdd((d) => ({ ...d, duration_min: e.target.value ? Number(e.target.value) : "" }))} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Disciplina</label>
-              <Select
-                value={recAdd.subject_id || ""}
-                onValueChange={(v) => setRecAdd((d) => ({ ...d, subject_id: v }))}
-              >
-                <SelectTrigger><SelectValue placeholder="(Opcional)" /></SelectTrigger>
-                <SelectContent>
-                  {subjects.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Professor</label>
-              <Input value={recAdd.teacher} onChange={(e) => setRecAdd((d) => ({ ...d, teacher: e.target.value }))} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Sala (sugestão)</label>
-              <Input value={recAdd.room} onChange={(e) => setRecAdd((d) => ({ ...d, room: e.target.value }))} placeholder="ex.: 2" />
-            </div>
-            <div className="md:col-span-7 flex justify-end">
-              <Button onClick={addRecurring} disabled={recSaving}>
-                <Plus className="h-4 w-4 mr-2" />
-                {recSaving ? "A adicionar…" : "Adicionar recorrente"}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Agendadas (mês) */}
-      <Card className="glass-panel">
-        <CardHeader className="flex items-start justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-primary" />
-              Aulas Agendadas — {ym}
-            </CardTitle>
-            <CardDescription>Explicações pontuais e geradas pelas recorrentes</CardDescription>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input type="month" value={ym} onChange={(e) => setYm(e.target.value)} className="w-[160px]" />
-            <Button variant="outline" onClick={() => reloadScheduled(profile.id, ym)}>
-              <RefreshCcw className="h-4 w-4 mr-2" />
-              Recarregar
-            </Button>
-            <Button onClick={generateMonthFromRecurring} disabled={genSaving || recurring.length === 0}>
-              <CalIcon className="h-4 w-4 mr-2" />
-              {genSaving ? "A gerar…" : "Gerar mês pelas recorrentes"}
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          {scheduled.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Sem aulas agendadas para {ym}.</div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Hora</TableHead>
-                  <TableHead>Disciplina</TableHead>
-                  <TableHead>Professor</TableHead>
-                  <TableHead>Grupo</TableHead>
-                  <TableHead>Sala</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="w-24">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {scheduled.map((s) => {
-                  const d = new Date(s.starts_at);
-                  const ds = d.toLocaleDateString("pt-PT");
-                  const ts = d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
-                  const subjName = subjects.find(ss => ss.id === s.subject_id)?.name || "—";
-                  const teacher = s.source_recurring_id ? (recMapById.get(s.source_recurring_id)?.teacher ?? "—") : "—";
-                  const k = groupKey(s);
-                  const size = groupCounts[k] || 1;
-                  const canCancel = s.status !== "canceled" && !within24h(s.starts_at);
-
-                  return (
-                    <TableRow key={s.id}>
-                      <TableCell>
-                        <div className="flex gap-2 items-center">
-                          <Pill tone="default">{ds}</Pill>
-                          <Pill tone="brand">{ts}</Pill>
-                        </div>
-                      </TableCell>
-                      <TableCell><Pill tone="info">{subjName}</Pill></TableCell>
-                      <TableCell><Pill tone="default">{teacher}</Pill></TableCell>
-                      <TableCell>
-                        <Pill tone={size > 1 ? "success" : "default"} title={`${size} aluno(s) neste grupo`}>
-                          <Users className="h-3.5 w-3.5" /> {size}
-                        </Pill>
-                      </TableCell>
-                      <TableCell>
-                        <Pill tone="default">{s.room || "—"}</Pill>
-                      </TableCell>
-                      <TableCell>
-                        <Pill
-                          tone={
-                            s.status === "canceled" ? "danger" :
-                            s.status === "scheduled" ? "brand" : "default"
-                          }
-                        >
-                          {s.status}
-                        </Pill>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => cancelScheduled(s)}
-                            disabled={!canCancel}
-                            title={canCancel ? "Cancelar" : "Não é possível cancelar (<24h ou já cancelada)"}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
+        {/* ---- TAB: AGENDAMENTO ---- */}
+        <TabsContent value="agenda" className="space-y-6">
+          {/* Recorrentes */}
+          <Card className="glass-panel">
+            <CardHeader className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <CalIcon className="h-5 w-5 text-primary" />
+                  Aulas Recorrentes (semanais)
+                </CardTitle>
+                <CardDescription>Padrões que geram as agendadas do mês</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {recurring.length === 0 ? (
+                <div className="text-sm text-muted-foreground">Sem recorrências definidas.</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Dia</TableHead>
+                      <TableHead>Hora</TableHead>
+                      <TableHead>Duração</TableHead>
+                      <TableHead>Disciplina</TableHead>
+                      <TableHead>Professor</TableHead>
+                      <TableHead>Sala (sugerida)</TableHead>
+                      <TableHead className="w-20">Ações</TableHead>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
+                  </TableHeader>
+                  <TableBody>
+                    {recurring.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell><Pill tone="default">{WEEKDAYS.find(w => w.value === r.weekday)?.label || r.weekday}</Pill></TableCell>
+                        <TableCell><Pill tone="brand">{r.start_time}</Pill></TableCell>
+                        <TableCell><Pill tone="info">{r.duration_min} min</Pill></TableCell>
+                        <TableCell>
+                          <Pill tone="default">
+                            {subjects.find(s => s.id === r.subject_id)?.name || "—"}
+                          </Pill>
+                        </TableCell>
+                        <TableCell><Pill tone="default">{r.teacher || "—"}</Pill></TableCell>
+                        <TableCell><Pill tone="default">{r.room || "—"}</Pill></TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="icon" onClick={() => removeRecurring(r.id)} title="Remover">
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
 
-          {/* Agendar pontual (com professor opcional para melhor agrupamento) */}
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 border rounded-xl p-3">
-            <div>
-              <label className="text-xs text-muted-foreground">Data</label>
-              <Input type="date" value={schedAdd.date} onChange={(e) => setSchedAdd((d) => ({ ...d, date: e.target.value }))} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Hora</label>
-              <Input type="time" value={schedAdd.time} onChange={(e) => setSchedAdd((d) => ({ ...d, time: e.target.value }))} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Duração (min)</label>
-              <Input type="number" value={schedAdd.duration_min} onChange={(e) => setSchedAdd((d) => ({ ...d, duration_min: e.target.value ? Number(e.target.value) : "" }))} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Disciplina</label>
-              <Select
-                value={schedAdd.subject_id || ""}
-                onValueChange={(v) => setSchedAdd((d) => ({ ...d, subject_id: v }))}
-              >
-                <SelectTrigger><SelectValue placeholder="(Opcional)" /></SelectTrigger>
-                <SelectContent>
-                  {subjects.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Professor (opcional)</label>
-              <Input value={schedAdd.teacher} onChange={(e) => setSchedAdd((d) => ({ ...d, teacher: e.target.value }))} placeholder="Usado para agrupar" />
-            </div>
-            <div className="flex items-end justify-end">
-              <Button onClick={addScheduled} disabled={schedSaving}>
-                <Plus className="h-4 w-4 mr-2" />
-                {schedSaving ? "A agendar…" : "Agendar pontual"}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+              {/* Adicionar recorrente */}
+              <div className="grid grid-cols-1 md:grid-cols-7 gap-3 border rounded-xl p-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">Dia</label>
+                  <Select
+                    value={recAdd.weekday ? String(recAdd.weekday) : ""}
+                    onValueChange={(v) => setRecAdd((d) => ({ ...d, weekday: v ? Number(v) : "" }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Seleciona" /></SelectTrigger>
+                    <SelectContent>
+                      {WEEKDAYS.map((w) => (<SelectItem key={w.value} value={String(w.value)}>{w.label}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Hora</label>
+                  <Input type="time" value={recAdd.start_time} onChange={(e) => setRecAdd((d) => ({ ...d, start_time: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Duração (min)</label>
+                  <Input type="number" value={recAdd.duration_min} onChange={(e) => setRecAdd((d) => ({ ...d, duration_min: e.target.value ? Number(e.target.value) : "" }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Disciplina</label>
+                  <Select
+                    value={recAdd.subject_id || ""}
+                    onValueChange={(v) => setRecAdd((d) => ({ ...d, subject_id: v }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="(Opcional)" /></SelectTrigger>
+                    <SelectContent>
+                      {subjects.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Professor</label>
+                  <Input value={recAdd.teacher} onChange={(e) => setRecAdd((d) => ({ ...d, teacher: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Sala (sugestão)</label>
+                  <Input value={recAdd.room} onChange={(e) => setRecAdd((d) => ({ ...d, room: e.target.value }))} placeholder="ex.: 2" />
+                </div>
+                <div className="md:col-span-7 flex justify-end">
+                  <Button onClick={addRecurring} disabled={recSaving}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    {recSaving ? "A adicionar…" : "Adicionar recorrente"}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Agendadas (mês) */}
+          <Card className="glass-panel">
+            <CardHeader className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-primary" />
+                  Aulas Agendadas — {ym}
+                </CardTitle>
+                <CardDescription>Explicações pontuais e geradas pelas recorrentes</CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input type="month" value={ym} onChange={(e) => setYm(e.target.value)} className="w-[160px]" />
+                <Button variant="outline" onClick={() => reloadScheduled(profile.id, ym)}>
+                  <RefreshCcw className="h-4 w-4 mr-2" />
+                  Recarregar
+                </Button>
+                <Button onClick={generateMonthFromRecurring} disabled={genSaving || recurring.length === 0}>
+                  <CalIcon className="h-4 w-4 mr-2" />
+                  {genSaving ? "A gerar…" : "Gerar mês pelas recorrentes"}
+                </Button>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              {scheduled.length === 0 ? (
+                <div className="text-sm text-muted-foreground">Sem aulas agendadas para {ym}.</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Data</TableHead>
+                      <TableHead>Hora</TableHead>
+                      <TableHead>Disciplina</TableHead>
+                      <TableHead>Professor</TableHead>
+                      <TableHead>Grupo</TableHead>
+                      <TableHead>Sala</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="w-24">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {scheduled.map((s) => {
+                      const d = new Date(s.starts_at);
+                      const ds = d.toLocaleDateString("pt-PT");
+                      const ts = d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+                      const subjName = subjects.find(ss => ss.id === s.subject_id)?.name || "—";
+                      const teacher = s.source_recurring_id ? (recMapById.get(s.source_recurring_id)?.teacher ?? "—") : "—";
+                      const k = groupKey(s);
+                      const size = groupCounts[k] || 1;
+                      const canCancel = s.status !== "canceled" && !within24h(s.starts_at);
+
+                      return (
+                        <TableRow key={s.id}>
+                          <TableCell>
+                            <div className="flex gap-2 items-center">
+                              <Pill tone="default">{ds}</Pill>
+                              <Pill tone="brand">{ts}</Pill>
+                            </div>
+                          </TableCell>
+                          <TableCell><Pill tone="info">{subjName}</Pill></TableCell>
+                          <TableCell><Pill tone="default">{teacher}</Pill></TableCell>
+                          <TableCell>
+                            <Pill tone={size > 1 ? "success" : "default"} title={`${size} aluno(s) neste grupo`}>
+                              <Users className="h-3.5 w-3.5" /> {size}
+                            </Pill>
+                          </TableCell>
+                          <TableCell>
+                            <Pill tone="default">{s.room || "—"}</Pill>
+                          </TableCell>
+                          <TableCell>
+                            <Pill
+                              tone={
+                                s.status === "canceled" ? "danger" :
+                                s.status === "scheduled" ? "brand" : "default"
+                              }
+                            >
+                              {s.status}
+                            </Pill>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => cancelScheduled(s)}
+                                disabled={!canCancel}
+                                title={canCancel ? "Cancelar" : "Não é possível cancelar (<24h ou já cancelada)"}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+
+              {/* Agendar pontual */}
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-3 border rounded-xl p-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">Data</label>
+                  <Input type="date" value={schedAdd.date} onChange={(e) => setSchedAdd((d) => ({ ...d, date: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Hora</label>
+                  <Input type="time" value={schedAdd.time} onChange={(e) => setSchedAdd((d) => ({ ...d, time: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Duração (min)</label>
+                  <Input type="number" value={schedAdd.duration_min} onChange={(e) => setSchedAdd((d) => ({ ...d, duration_min: e.target.value ? Number(e.target.value) : "" }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Disciplina</label>
+                  <Select
+                    value={schedAdd.subject_id || ""}
+                    onValueChange={(v) => setSchedAdd((d) => ({ ...d, subject_id: v }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="(Opcional)" /></SelectTrigger>
+                    <SelectContent>
+                      {subjects.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Professor (opcional)</label>
+                  <Input value={schedAdd.teacher} onChange={(e) => setSchedAdd((d) => ({ ...d, teacher: e.target.value }))} placeholder="Usado para agrupar" />
+                </div>
+                <div className="flex items-end justify-end">
+                  <Button onClick={addScheduled} disabled={schedSaving}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    {schedSaving ? "A agendar…" : "Agendar pontual"}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ---- TAB: FATURAÇÃO ---- */}
+        <TabsContent value="faturacao" className="space-y-6">
+          <Card className="glass-panel">
+            <CardHeader className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5 text-primary" />
+                  Faturação & Movimentos
+                </CardTitle>
+                <CardDescription>Operações de saldo, compras e configuração de desconto</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => reloadFinance(profile)}>
+                  <RefreshCcw className="h-4 w-4 mr-2" />
+                  Recarregar
+                </Button>
+                <Button onClick={handleSave} disabled={saving}>
+                  <Save className="h-4 w-4 mr-2" />
+                  {saving ? "A guardar…" : "Guardar alterações"}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Linha superior: horas + desconto */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-muted-foreground">Horas (campo do perfil)</div>
+                  <div className="text-2xl font-semibold">{Number(draft.horas ?? profile.horas ?? 0).toFixed(2)}h</div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <div className="text-xs text-muted-foreground">Saldo (€) (campo do perfil)</div>
+                  <div className="text-2xl font-semibold">
+                    {Number(draft.saldo ?? profile.saldo ?? 0).toFixed(2)} €
+                  </div>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <label className="text-xs text-muted-foreground">Código de desconto</label>
+                  <Select
+  value={draft.discount ?? NO_DISCOUNT}
+  onValueChange={(v) => setF("discount", v === NO_DISCOUNT ? null : v)}
+>
+  <SelectTrigger>
+    <SelectValue placeholder="Sem desconto" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value={NO_DISCOUNT}>Sem desconto</SelectItem>
+    {discounts.map((d) => (
+      <SelectItem key={d.code} value={d.code}>
+        {d.name} — {d.code} ({d.value}%)
+      </SelectItem>
+    ))}
+  </SelectContent>
+</Select>
+
+                  {draft.discount && (
+                    <div className="text-xs text-emerald-700 mt-1">
+                      Desconto selecionado: <strong>{draft.discount}</strong>
+                      {" — "}
+                      {discounts.find(x => x.code === draft.discount)?.name ?? "—"} (
+                      {discounts.find(x => x.code === draft.discount)?.value ?? "?"}%)
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Movimentos */}
+              <div>
+                <div className="text-sm font-semibold mb-2">Movimentos (balance_operations)</div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Origem</TableHead>
+                        <TableHead className="text-right">Horas</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead>Ref.</TableHead>
+                        <TableHead>Nota</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {opsLoading ? (
+                        <TableRow><TableCell colSpan={7} className="text-sm text-muted-foreground">A carregar…</TableCell></TableRow>
+                      ) : ops.length === 0 ? (
+                        <TableRow><TableCell colSpan={7} className="text-sm text-muted-foreground">Sem movimentos.</TableCell></TableRow>
+                      ) : (
+                        ops.map(r => (
+                          <TableRow key={r.id}>
+                            <TableCell>{new Date(r.created_at).toLocaleString("pt-PT")}</TableCell>
+                            <TableCell>
+                              <Pill tone={r.type === "credit" ? "success" : "danger"}>
+                                {r.type === "credit" ? "Crédito" : "Débito"}
+                              </Pill>
+                            </TableCell>
+                            <TableCell>{sourceLabel(r.source)}</TableCell>
+                            <TableCell className="text-right">
+                              {r.hours_delta === 0 ? "—" : `${r.hours_delta > 0 ? "+" : ""}${Number(r.hours_delta.toFixed(2))}h`}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {euro(r.amount_cents)}
+                            </TableCell>
+                            <TableCell>
+                              {r.order_id ? `Pedido ${r.order_id.slice(0, 8)}…` :
+                               r.lesson_id ? `Aula ${r.lesson_id.slice(0, 8)}…` : "—"}
+                            </TableCell>
+                            <TableCell className="max-w-[340px]">
+                              <span className="text-sm text-muted-foreground line-clamp-2">{r.note ?? "—"}</span>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              {/* Orders */}
+              <div>
+                <div className="text-sm font-semibold mb-2">Pedidos/Compras (orders)</div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Horas</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead>Pago em</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ordersLoading ? (
+                        <TableRow><TableCell colSpan={5} className="text-sm text-muted-foreground">A carregar…</TableCell></TableRow>
+                      ) : orders.length === 0 ? (
+                        <TableRow><TableCell colSpan={5} className="text-sm text-muted-foreground">Sem compras.</TableCell></TableRow>
+                      ) : (
+                        orders.map(o => (
+                          <TableRow key={o.id}>
+                            <TableCell>{new Date(o.created_at).toLocaleString("pt-PT")}</TableCell>
+                            <TableCell>
+                              <Pill tone={o.status === "paid" ? "success" : o.status === "pending" ? "warn" : "default"}>
+                                {o.status}
+                              </Pill>
+                            </TableCell>
+                            <TableCell>{o.horas}h</TableCell>
+                            <TableCell className="text-right">{euro(o.amount_cents)}</TableCell>
+                            <TableCell>{o.paid_at ? new Date(o.paid_at).toLocaleString("pt-PT") : "—"}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <style>
         {`

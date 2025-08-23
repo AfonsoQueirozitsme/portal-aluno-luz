@@ -143,7 +143,7 @@ export default function Landing() {
               <a href="#parcerias" className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition text-sm">Parcerias</a>
               <a href="#contactos" className="px-2 py-1 rounded-md hover:bg-primary/10 hover:text-primary transition text-sm">Contactos</a>
               <Button asChild size="sm" className="ml-2">
-  <a href="https://alunos.arvoreconhecimento.com" target="_blank" rel="noopener noreferrer">
+  <a href="https://www.arvoreconhecimento.com/auth" target="_blank" rel="noopener noreferrer">
     Área reservada
   </a>
 </Button>
@@ -238,7 +238,7 @@ export default function Landing() {
               <div className="mt-6 flex gap-3">
                 <Button onClick={() => scrollToId("servicos")}>Ver serviços</Button>
                 <Button asChild variant="outline">
-  <a href="https://alunos.arvoreconhecimento.com" target="_blank" rel="noopener noreferrer">
+  <a href="https://www.arvoreconhecimento.com/auth" target="_blank" rel="noopener noreferrer">
     Entrar na área reservada
   </a>
 </Button>

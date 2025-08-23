@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard, TrendingUp, Receipt, Info, ArrowRight } from "lucide-react";
+import { CreditCard, TrendingUp, Receipt, Info, ArrowRight, Lock, ShieldCheck, Tag } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 /* ─────────────────────────────────────────────────────────────
@@ -87,11 +87,33 @@ const faturasPos = [
 
 type OrderRow = {
   id: string;
-  status: "pending" | "paid" | "failed" | "canceled" | "expired";
+  status: string;
   horas: number;
   amount_cents: number;
   created_at: string;
   paid_at: string | null;
+};
+
+type StripeMandate = "not_started" | "pending" | "done";
+
+type BalanceOp = {
+  id: string;
+  type: "credit" | "debit";
+  hours_delta: number;
+  amount_cents: number;
+  source: string | null;
+  order_id: string | null;
+  lesson_id: string | null;
+  note: string | null;
+  created_at: string;
+};
+
+type DiscountRow = {
+  id: string;
+  name: string;
+  code: string;
+  value: number;   // percentagem [0..100] (toleramos também 0..1 no UI)
+  active?: boolean | null;
 };
 
 export default function Pagamentos() {
@@ -104,6 +126,7 @@ export default function Pagamentos() {
   // UI estados
   const [modalOpen, setModalOpen] = useState(false);
   const [switchModalOpen, setSwitchModalOpen] = useState(false);
+  const [ddModalOpen, setDdModalOpen] = useState(false);
   const [pendingTab, setPendingTab] = useState<"pre" | "pos" | null>(null);
 
   const [modalidade, setModalidade] = useState<Modalidade>("individual");
@@ -117,7 +140,15 @@ export default function Pagamentos() {
   const [nivel, setNivel] = useState<Nivel>("sec_sem_exame"); // derivado (read-only)
   const [saldo, setSaldo] = useState<number>(0); // horas
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [ops, setOps] = useState<BalanceOp[]>([]);
   const [hasSession, setHasSession] = useState(false);
+
+  // perfil/pos-pago/discount
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [allowPospago, setAllowPospago] = useState<boolean>(false);
+  const [stripeMandateStatus, setStripeMandateStatus] = useState<StripeMandate>("not_started");
+  const [stripeBusy, setStripeBusy] = useState(false);
+  const [discount, setDiscount] = useState<DiscountRow | null>(null);
 
   // observar sessão
   useEffect(() => {
@@ -128,6 +159,11 @@ export default function Pagamentos() {
     return () => unsub?.();
   }, []);
 
+  const getActiveProfileId = () => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("active_profile_id");
+  };
+
   async function loadData() {
     try {
       setLoading(true);
@@ -137,27 +173,80 @@ export default function Pagamentos() {
       if (uErr) throw uErr;
       if (!user) throw new Error("Sessão inválida. Faz login novamente.");
 
+      // perfil ativo
+      let profId = getActiveProfileId();
+      if (!profId) {
+        const { data: first, error: fErr } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("auth_user_id", user.id)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (fErr) throw fErr;
+        if (!first?.id) throw new Error("Não encontrei nenhum perfil.");
+        profId = first.id;
+        localStorage.setItem("active_profile_id", profId);
+      }
+      setActiveProfileId(profId);
+
+      // dados do perfil (inclui coluna discount)
       const { data: prof, error: pErr } = await supabase
         .from("profiles")
-        .select("school_year")
-        .eq("id", user.id)
+        .select("school_year, allow_pospago, stripe_mandate_status, discount")
+        .eq("id", profId)
         .maybeSingle();
       if (pErr) throw pErr;
 
       const sy = prof?.school_year ?? null;
       setSchoolYear(sy);
       setNivel(mapSchoolYearToNivel(sy));
+      setAllowPospago(Boolean(prof?.allow_pospago));
+      setStripeMandateStatus((prof?.stripe_mandate_status as StripeMandate) ?? "not_started");
 
+      // carrega o desconto (se houver)
+      setDiscount(null);
+      const discountId = prof?.discount as string | null;
+      if (discountId) {
+        const { data: disc, error: dErr } = await supabase
+          .from("discount")
+          .select("id, name, code, value, active")
+          .eq("id", discountId)
+          .maybeSingle();
+        if (!dErr && disc && (disc.active ?? true) && Number(disc.value) > 0) {
+          setDiscount({
+            id: disc.id,
+            name: disc.name,
+            code: disc.code,
+            value: Number(disc.value),
+            active: disc.active,
+          });
+        }
+      }
+
+      // saldo (RPC por utilizador)
       const { data: bal, error: bErr } = await supabase.rpc("get_my_balance");
       if (bErr) throw bErr;
       setSaldo(Number(bal ?? 0));
 
+      // orders do utilizador auth
       const { data: ords, error: oErr } = await supabase
         .from("orders")
         .select("id,status,horas,amount_cents,created_at,paid_at")
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false });
       if (oErr) throw oErr;
       setOrders(ords ?? []);
+
+      // balance_operations (últimos 50)
+      const { data: opsData, error: opsErr } = await supabase
+        .from("balance_operations")
+        .select("id,type,hours_delta,amount_cents,source,order_id,lesson_id,note,created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (opsErr) throw opsErr;
+      setOps(opsData ?? []);
     } catch (e: any) {
       setFetchErr(e?.message ?? "Falha a carregar dados.");
     } finally {
@@ -170,10 +259,10 @@ export default function Pagamentos() {
     loadData();
   }, []);
 
-  // após retorno do Stripe ?checkout=success → refetch
+  // após retorno do Stripe ?checkout=success ou ?setup=success → refetch
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    if (params.get("checkout") === "success") {
+    if (params.get("checkout") === "success" || params.get("setup") === "success") {
       loadData();
     }
   }, [location.search]);
@@ -196,15 +285,21 @@ export default function Pagamentos() {
     const flag = params.get("checkout");
     if (flag === "success") return { type: "success" as const, text: "Pagamento concluído com sucesso! 🎉" };
     if (flag === "cancel") return { type: "warn" as const, text: "Pagamento cancelado." };
+    const setup = params.get("setup");
+    if (setup === "success") return { type: "success" as const, text: "Débito direto configurado com sucesso. 👍" };
+    if (setup === "cancel") return { type: "warn" as const, text: "Configuração de débito direto cancelada." };
     return null;
   }, [location.search]);
 
-  // tabs handler
+  // tabs handler com bloqueio de pós-pago
   const handleTab = (t: "pre" | "pos") => {
-    if (t !== tab) {
-      setPendingTab(t);
-      setSwitchModalOpen(true);
+    if (t === tab) return;
+    if (t === "pos" && !allowPospago) {
+      setDdModalOpen(true);
+      return;
     }
+    setPendingTab(t);
+    setSwitchModalOpen(true);
   };
   const confirmSwitch = () => {
     if (pendingTab) {
@@ -214,7 +309,6 @@ export default function Pagamentos() {
     }
   };
 
-  // orçamento (client-side; valor final é o do servidor)
   function quotePrice(horasPack: number) {
     const unit = PRICE_TABLE[nivel][modalidade][duracao]; // €/sessão
     const sessions = horasPack / (duracao / 60);
@@ -222,6 +316,7 @@ export default function Pagamentos() {
     const total = subtotal * (1 + SERVICE_FEE);
     return Math.round(total * 100) / 100;
   }
+  
 
   // exige sessão
   async function requireSession() {
@@ -240,8 +335,8 @@ export default function Pagamentos() {
       const access_token = session.access_token;
 
       // 2) envs obrigatórios
-      const supaUrl = import.meta.env.VITE_SUPABASE_URL;      // ex: https://qzvikwxwvwmngbnyxpwr.supabase.co
-      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY; // anon key
+      const supaUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       if (!supaUrl || !anonKey) throw new Error("VITE_SUPABASE_URL/ANON_KEY em falta");
 
       // 3) domínio correto das functions
@@ -276,9 +371,7 @@ export default function Pagamentos() {
 
       if (!res.ok) {
         console.error("[create-checkout] status:", res.status, json);
-        if (res.status === 401) {
-          throw new Error("Não autorizado (401). Garante que a função lê o utilizador via JWT e que estás autenticado.");
-        }
+        if (res.status === 401) throw new Error("Não autorizado (401). Garante que estás autenticado.");
         throw new Error(json?.error || `HTTP ${res.status}`);
       }
       if (!json?.url) throw new Error("Resposta inválida da função (sem url)");
@@ -291,6 +384,130 @@ export default function Pagamentos() {
       setComprandoPack(null);
     }
   }
+
+  // Stripe setup (débito direto) — envia profile_id + URLs
+  async function handleStripeSetup() {
+    try {
+      setStripeBusy(true);
+      const profileId = activeProfileId || getActiveProfileId();
+      if (!profileId) throw new Error("Perfil ativo não encontrado.");
+
+      const origin = window.location.origin;
+      const { data, error } = await supabase.functions.invoke("create-stripe-setup-session", {
+        method: "POST",
+        body: {
+          profile_id: profileId,
+          success_url: `${origin}/aluno/pagamentos/pre-pago?setup=success`,
+          cancel_url:  `${origin}/aluno/pagamentos/pre-pago?setup=cancel`,
+        },
+      });
+      if (error) throw error;
+      if (data?.url) {
+        window.location.href = data.url; // redireciona para o Checkout (Setup Mode)
+        return;
+      }
+      throw new Error("Resposta inesperada da Stripe.");
+    } catch (e: any) {
+      alert(e?.message ?? "Erro ao iniciar configuração do débito direto.");
+    } finally {
+      setStripeBusy(false);
+    }
+  }
+
+  // helpers UI
+  const euro = (cents: number) => (cents === 0 ? "—" : `${(cents / 100).toFixed(2)} €`);
+  const fmtHours = (h: number) => (h === 0 ? "—" : `${h > 0 ? "+" : ""}${Number(h.toFixed(2))}h`);
+  const fmtDateTime = (iso: string) => new Date(iso).toLocaleString("pt-PT");
+  const pct = (v: number) => {
+    const val = Number(v);
+    if (!Number.isFinite(val) || val <= 0) return null;
+    const p = val <= 1 ? val * 100 : val; // tolera 0..1 também
+    return Math.round(p);
+  };
+
+  const preOps = useMemo(
+    () => ops.filter(o => o.source === "order" || o.source === "lesson_precharge"),
+    [ops]
+  );
+  const posOps = useMemo(
+    () => ops.filter(o => o.source === "lesson_poscharge"),
+    [ops]
+  );
+
+  const OpsTable = ({ rows }: { rows: BalanceOp[] }) => (
+    <div className="overflow-x-auto">
+      <table className="w-full mt-2 border-spacing-y-2 border-separate">
+        <thead>
+          <tr>
+            <th className="text-left py-2 px-4">Data</th>
+            <th className="text-left py-2 px-4">Tipo</th>
+            <th className="text-left py-2 px-4">Origem</th>
+            <th className="text-right py-2 px-4">Horas</th>
+            <th className="text-right py-2 px-4">Valor</th>
+            <th className="text-left py-2 px-4">Ref.</th>
+            <th className="text-left py-2 px-4">Nota</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={7} className="py-4 px-4 text-sm text-muted-foreground">
+                Sem movimentos a apresentar.
+              </td>
+            </tr>
+          )}
+          {rows.map((r) => {
+            const typeBadge =
+              r.type === "credit"
+                ? "bg-green-100 text-green-700"
+                : "bg-red-100 text-red-700";
+
+            const sourceBadge =
+              r.source === "order"
+                ? "bg-blue-100 text-blue-700"
+                : r.source === "lesson_precharge"
+                  ? "bg-amber-100 text-amber-700"
+                  : r.source === "lesson_poscharge"
+                    ? "bg-purple-100 text-purple-700"
+                    : "bg-muted text-muted-foreground";
+
+            const sourceLabel =
+              r.source === "order"
+                ? "Compra"
+                : r.source === "lesson_precharge"
+                  ? "Explicação"
+                  : (r.source ?? "—");
+
+            const ref =
+              r.order_id ? `Pedido ${r.order_id.slice(0, 8)}…` :
+              r.lesson_id ? `Aula ${r.lesson_id.slice(0, 8)}…` : "—";
+
+            return (
+              <tr key={r.id} className="bg-card rounded-xl shadow border border-border">
+                <td className="py-2 px-4">{new Date(r.created_at).toLocaleString("pt-PT")}</td>
+                <td className="py-2 px-4">
+                  <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${typeBadge}`}>
+                    {r.type === "credit" ? "Crédito" : "Débito"}
+                  </span>
+                </td>
+                <td className="py-2 px-4">
+                  <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${sourceBadge}`}>
+                    {sourceLabel}
+                  </span>
+                </td>
+                <td className="py-2 px-4 text-right">{fmtHours(r.hours_delta)}</td>
+                <td className="py-2 px-4 text-right">{euro(r.amount_cents)}</td>
+                <td className="py-2 px-4">{ref}</td>
+                <td className="py-2 px-4 max-w-[320px]">
+                  <span className="text-sm text-muted-foreground line-clamp-2">{r.note ?? "—"}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 
   // pós-pago (placeholders)
   const valorDivida = useMemo(
@@ -306,6 +523,23 @@ export default function Pagamentos() {
     []
   );
 
+  // Banner de desconto (se existir)
+  const DiscountBanner = () => {
+    if (!discount) return null;
+    const percent = pct(discount.value);
+    if (!percent) return null;
+
+    return (
+      <div className="mb-4 px-4 py-3 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-start gap-2">
+        <Tag className="w-4 h-4 mt-0.5" />
+        <div className="text-sm">
+          Estás coberto pelo desconto <span className="font-semibold">“{discount.name}”</span>
+          {` — ${percent}% em todas as explicações.`}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="flex mb-8 border-b border-border">
@@ -319,19 +553,56 @@ export default function Pagamentos() {
         >
           <CreditCard className="w-5 h-5" /> Pré-pago
         </button>
+
         <button
           className={`px-6 py-3 font-semibold transition-all duration-300 border-b-2 flex items-center gap-2 rounded-t-lg ${
             tab === "pos"
               ? "border-primary text-primary bg-primary/5 shadow"
-              : "border-transparent text-muted-foreground hover:text-primary hover:bg-primary/5"
+              : !allowPospago
+                ? "border-transparent text-muted-foreground/70 hover:text-primary/90 hover:bg-primary/5"
+                : "border-transparent text-muted-foreground hover:text-primary hover:bg-primary/5"
           }`}
           onClick={() => handleTab("pos")}
+          aria-disabled={!allowPospago}
+          title={!allowPospago ? "Disponível apenas com débito direto ativo" : undefined}
         >
-          <Receipt className="w-5 h-5" /> Pós-pago
+          {!allowPospago ? <Lock className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
+          Pós-pago
         </button>
       </div>
 
-      {/* Modal troca de método */}
+      {/* Modal bloqueio pós-pago por falta de DD */}
+      <Dialog open={ddModalOpen} onOpenChange={setDdModalOpen}>
+        <DialogContent className="max-w-md rounded-2xl shadow-2xl border-0 animate-modal-fade-in">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Lock className="w-6 h-6 text-primary" />
+              Pós-pago indisponível
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-3 mb-6 text-sm text-muted-foreground">
+            Para usares o <strong>Pós-pago</strong>, precisas de ter o <strong>débito direto</strong> configurado.
+            Assim garantimos a cobrança automática das aulas no fim do mês.
+          </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
+            <ShieldCheck className="w-4 h-4" />
+            Estado atual: <span className="font-medium ml-1">{stripeMandateStatus === "done" ? "Ativo" : stripeMandateStatus === "pending" ? "A aguardar confirmação" : "Não iniciado"}</span>
+          </div>
+          <div className="flex gap-4 justify-center mt-2">
+            <Button variant="outline" onClick={() => setDdModalOpen(false)}>
+              Fechar
+            </Button>
+            <Button variant="hero" onClick={handleStripeSetup} disabled={stripeBusy}>
+              {stripeBusy ? "A abrir…" : "Configurar débito direto"}
+            </Button>
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-3 text-center">
+            Depois de concluíres, voltamos e atualizamos o estado automaticamente.
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal troca de método (quando permitido) */}
       <Dialog open={switchModalOpen} onOpenChange={setSwitchModalOpen}>
         <DialogContent className="max-w-md rounded-2xl shadow-2xl border-0 animate-modal-fade-in">
           <DialogHeader>
@@ -341,12 +612,11 @@ export default function Pagamentos() {
             </DialogTitle>
           </DialogHeader>
           <div className="mt-4 mb-6 text-base text-muted-foreground text-center">
-            Tem a certeza que pretende trocar para o modo{" "}
+            Tens a certeza de que queres mudar para{" "}
             <span className="font-semibold text-primary">
               {pendingTab === "pre" ? "Pré-pago" : "Pós-pago"}
             </span>
-            ?<br />
-            Esta ação pode afetar a forma como as suas explicações são faturadas.
+            ?
           </div>
           <div className="flex gap-4 justify-center mt-4">
             <Button variant="outline" onClick={() => setSwitchModalOpen(false)}>
@@ -370,7 +640,7 @@ export default function Pagamentos() {
             <div className="mb-6 text-sm text-destructive">{fetchErr}</div>
           )}
 
-          {/* Mensagens do Stripe */}
+          {/* Mensagens */}
           {!loading && !fetchErr && checkoutMsg && (
             <div
               className={`mb-4 px-4 py-3 rounded-lg ${
@@ -382,6 +652,9 @@ export default function Pagamentos() {
               {checkoutMsg.text}
             </div>
           )}
+
+          {/* Banner de desconto (se existir) */}
+          {!loading && !fetchErr && <DiscountBanner />}
 
           {/* Métricas reais */}
           {!loading && !fetchErr && (
@@ -502,23 +775,30 @@ export default function Pagamentos() {
             </DialogContent>
           </Dialog>
 
+          {/* Movimentos PRE-PAGO */}
+          <h3 className="mt-10 mb-2 text-lg font-semibold">Movimentos (pré-pago)</h3>
+          <OpsTable rows={preOps} />
+
           {/* Notas */}
           <div className="mt-10">
             <div className="flex items-center gap-2 mb-2 text-muted-foreground text-sm">
               <Info className="w-4 h-4" />
-              O saldo pré-pago é descontado à medida que utiliza as explicações.
+              O saldo pré-pago é descontado à medida que usas as explicações.
             </div>
             <div className="flex items-center gap-2 text-muted-foreground text-sm">
               <TrendingUp className="w-4 h-4" />
-              Pode comprar mais horas a qualquer momento.
+              Podes comprar mais horas a qualquer momento.
             </div>
           </div>
         </div>
       )}
 
-      {/* Conteúdo PÓS-PAGO (placeholders) */}
+      {/* Conteúdo PÓS-PAGO */}
       {tab === "pos" && (
         <div className="transition-all duration-500 animate-fade-in-smooth">
+          {/* Banner de desconto (se existir) */}
+          {!loading && !fetchErr && <DiscountBanner />}
+
           <div className="mb-8 grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-primary/10 text-primary rounded-xl px-6 py-4 text-lg font-semibold flex flex-col items-center">
               <span>Horas consumidas</span>
@@ -538,53 +818,9 @@ export default function Pagamentos() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full mt-2 border-spacing-y-2 border-separate">
-              <thead>
-                <tr>
-                  <th className="text-left py-2 px-4">Fatura</th>
-                  <th className="text-left py-2 px-4">Período</th>
-                  <th className="text-left py-2 px-4">Data</th>
-                  <th className="text-right py-2 px-4">Valor</th>
-                  <th className="text-center py-2 px-4">Estado</th>
-                  <th className="text-center py-2 px-4">Método</th>
-                  <th className="text-center py-2 px-4">Vencimento</th>
-                  <th className="text-center py-2 px-4">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {faturasPos.map((f) => (
-                  <tr key={f.id} className="bg-card rounded-xl shadow border border-border">
-                    <td className="py-2 px-4 font-medium">{f.numero}</td>
-                    <td className="py-2 px-4">{f.periodo}</td>
-                    <td className="py-2 px-4">{f.data}</td>
-                    <td className="py-2 px-4 text-right">{f.valor.toFixed(2)} €</td>
-                    <td className="py-2 px-4 text-center">
-                      <span
-                        className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
-                          f.estado === "Pago" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-                        }`}
-                      >
-                        {f.estado}
-                      </span>
-                    </td>
-                    <td className="py-2 px-4 text-center">{f.metodo}</td>
-                    <td className="py-2 px-4 text-center">{f.vencimento}</td>
-                    <td className="py-2 px-4 text-center">
-                      <Button variant="outline" size="sm" className="rounded-lg" onClick={() => window.open("/fatura", "_blank")}>
-                        Ver Fatura
-                      </Button>
-                      {f.estado !== "Pago" && (
-                        <Button variant="hero" size="sm" className="ml-2 rounded-lg" onClick={() => window.open("/fatura", "_blank")}>
-                          Pagar
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {/* Movimentos PÓS-PAGO */}
+          <h3 className="mt-2 mb-2 text-lg font-semibold">Movimentos (pós-pago)</h3>
+          <OpsTable rows={posOps} />
 
           <div className="mt-10">
             <div className="flex items-center gap-2 mb-2 text-muted-foreground text-sm">
@@ -593,7 +829,7 @@ export default function Pagamentos() {
             </div>
             <div className="flex items-center gap-2 text-muted-foreground text-sm">
               <TrendingUp className="w-4 h-4" />
-              Receberá uma fatura mensal com o resumo dos serviços.
+              Receberás uma fatura mensal com o resumo dos serviços.
             </div>
           </div>
         </div>

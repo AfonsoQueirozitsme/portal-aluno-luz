@@ -3,13 +3,13 @@ import React, { useMemo } from "react";
 
 export type Lesson = {
   id?: string;
-  day: "Seg" | "Ter" | "Qua" | "Qui" | "Sex" | "Sáb" | "Dom";
+  day: "Seg" | "Ter" | "Qua" | "Qui" | "Sex" | "Sáb" | "Dom"; // mantém tipos antigos por compatibilidade
   start: string; // "HH:MM"
   end: string;   // "HH:MM"
   subject?: string;
   teacher?: string;
   room?: string;
-  meta?: any;    // qualquer payload (ex.: id real da scheduled_lesson)
+  meta?: any;
 };
 
 type Props = {
@@ -17,13 +17,14 @@ type Props = {
   startHour?: number;    // default 8
   endHour?: number;      // default 21
   slotMinutes?: number;  // default 30
-  showWeekend?: boolean; // default true
+  showWeekend?: boolean; // DEPRECATED (ignorado): fim-de-semana removido
   className?: string;
   onLessonClick?: (lesson: Lesson) => void;
   onEmptySlotClick?: (day: Lesson["day"], timeHHMM: string) => void;
 };
 
-const DAYS: Lesson["day"][] = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+// Apenas dias úteis (2ª–6ª)
+const DAYS: Lesson["day"][] = ["Seg", "Ter", "Qua", "Qui", "Sex"];
 
 function toMinutes(hhmm: string) {
   const [h, m] = hhmm.split(":").map(Number);
@@ -40,15 +41,13 @@ export default function Timetable({
   startHour = 8,
   endHour = 21,
   slotMinutes = 30,
-  showWeekend = true,
+  showWeekend = false, // ignorado (mantido só para não quebrar chamadas antigas)
   className,
   onLessonClick,
   onEmptySlotClick,
 }: Props) {
-  const dayCols = useMemo(
-    () => (showWeekend ? DAYS : DAYS.slice(0, 5)),
-    [showWeekend]
-  );
+  // Fica sempre 2ª–6ª
+  const dayCols = DAYS;
 
   const slots = useMemo(() => {
     const out: string[] = [];
@@ -60,12 +59,14 @@ export default function Timetable({
 
   const byDay = useMemo(() => {
     const map = new Map<Lesson["day"], Lesson[]>();
+    // pré-cria apenas dias úteis
     dayCols.forEach((d) => map.set(d, []));
+    // ignora entradas de fim-de-semana, mesmo que venham nas props
     lessons.forEach((l) => {
-      if (!map.has(l.day)) map.set(l.day, []);
+      if (!dayCols.includes(l.day)) return;
       map.get(l.day)!.push(l);
     });
-    // ordenar por start
+    // ordenar por hora de início
     for (const d of dayCols) {
       const arr = map.get(d)!;
       arr.sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
@@ -88,10 +89,10 @@ export default function Timetable({
         ))}
 
         {/* Rows */}
-        {slots.map((time, rowIdx) => (
+        {slots.map((time) => (
           <React.Fragment key={time}>
             {/* time column */}
-            <div className="px-2 py-3 text-xs text-muted-foreground sticky left-0 bg-white border-y">
+            <div className="px-2 py-3 text-xs text-muted-foreground sticky left-0 bg-background border-y">
               {time}
             </div>
 
@@ -99,14 +100,12 @@ export default function Timetable({
             {dayCols.map((day) => {
               const dayLessons = byDay.get(day)!;
 
-              // render bloco das aulas (absoluto dentro da célula do dia com full-height da linha)
-              // Nota: vamos renderizar overlay absoluto para permitir blocos com altura proporcional
               return (
                 <div
                   key={`${day}-${time}`}
                   className="relative h-14 border-y border-l last:border-r"
                 >
-                  {/* empty-slot button */}
+                  {/* clique no slot vazio */}
                   {onEmptySlotClick && (
                     <button
                       type="button"
@@ -118,9 +117,9 @@ export default function Timetable({
                     </button>
                   )}
 
-                  {/* aulas que intersectam este slot (posicionadas apenas uma vez, no slot onde começam) */}
+                  {/* blocos que começam neste slot */}
                   {dayLessons
-                    .filter((l) => l.start === time) // desenhar no slot inicial
+                    .filter((l) => l.start === time)
                     .map((l, idx) => {
                       const top = 2;
                       const height =
@@ -133,7 +132,7 @@ export default function Timetable({
                       return (
                         <div
                           key={`${l.start}-${idx}-${l.subject}`}
-                          className="absolute left-1 right-1 z-10 rounded-lg border bg-white shadow-sm hover:shadow-md transition"
+                          className="absolute left-1 right-1 z-10 rounded-lg border bg-background shadow-sm hover:shadow-md transition"
                           style={{ top, height }}
                           onClick={(e) => {
                             e.stopPropagation();

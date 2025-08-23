@@ -24,6 +24,8 @@ import {
   HelpCircle,
   LifeBuoy,
   MessageCircle,
+  Check,
+  X, // ← cruz para fechar
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -35,7 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { motion, AnimatePresence } from "framer-motion";
 import AssistantChat from "@/components/SupportAIChat";
@@ -59,7 +61,6 @@ type UINotification = {
   read_at: string | null;
   action_url?: string | null;
   severity?: "info" | "success" | "warning" | "error" | null;
-  // se tiveres mais colunas, adiciona aqui
 };
 
 /* -------------------------- Animações ---------------------------- */
@@ -74,29 +75,31 @@ const item: any = { hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0, tran
 /* ----------------------- Toasts laterais ------------------------- */
 type ToastItem = { id: string; message: string; duration: number };
 
-const ToastCard = ({
-  toast,
-  onClose,
-}: {
-  toast: ToastItem;
-  onClose: (id: string) => void;
-}) => {
+const ToastCard = ({ toast, onClose }: { toast: ToastItem; onClose: (id: string) => void }) => {
   const [progress, setProgress] = useState(100);
   const rafRef = useRef<number | null>(null);
   const startRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    const step = (t: number) => {
-      if (startRef.current === null) startRef.current = t;
-      const elapsed = t - startRef.current;
-      const pct = Math.max(0, 100 - (elapsed / toast.duration) * 100);
-      setProgress(pct);
-      if (elapsed < toast.duration) rafRef.current = requestAnimationFrame(step);
-      else onClose(toast.id);
-    };
-    rafRef.current = requestAnimationFrame(step);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [toast, onClose]);
+// dentro de ToastCard -> useEffect cleanup
+useEffect(() => {
+  const step = (t: number) => {
+    if (startRef.current === null) startRef.current = t;
+    const elapsed = t - startRef.current;
+    const pct = Math.max(0, 100 - (elapsed / toast.duration) * 100);
+    setProgress(pct);
+    if (elapsed < toast.duration) {
+      rafRef.current = requestAnimationFrame(step);
+    } else {
+      onClose(toast.id);
+    }
+  };
+
+  rafRef.current = requestAnimationFrame(step);
+
+  return () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current); // ✅ corrigido
+  };
+}, [toast, onClose]);
 
   return (
     <motion.div
@@ -126,13 +129,7 @@ const ToastCard = ({
   );
 };
 
-const ToastStack = ({
-  toasts,
-  remove,
-}: {
-  toasts: ToastItem[];
-  remove: (id: string) => void;
-}) => (
+const ToastStack = ({ toasts, remove }: { toasts: ToastItem[]; remove: (id: string) => void }) => (
   <div className="fixed right-4 top-4 z-[100] flex flex-col gap-3 max-w-[360px]">
     <AnimatePresence>
       {toasts.map((t) => (
@@ -153,7 +150,6 @@ const useToasts = () => {
 };
 
 /* ------------------ Notifications (dropdown) --------------------- */
-
 function formatPTDate(input: string) {
   try {
     const d = new Date(input);
@@ -184,9 +180,7 @@ const NotificationDropdown = ({
     const onClickOutside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onClickOutside);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -228,13 +222,12 @@ const NotificationDropdown = ({
                 Marcar todas como lidas
               </button>
             </div>
-
             <motion.div variants={staggerCol} initial="hidden" animate="show" className="max-h-80 overflow-y-auto p-2">
               {items.length === 0 ? (
                 <motion.div variants={item} className="p-4 text-muted-foreground text-sm">Sem notificações.</motion.div>
               ) : (
                 items.map((n) => {
-                  const unread = !n.read_at;
+                  const isUnread = !n.read_at;
                   return (
                     <motion.button
                       key={n.id}
@@ -242,17 +235,13 @@ const NotificationDropdown = ({
                       onClick={() => onItemClick(n)}
                       className={[
                         "w-full text-left p-3 rounded-lg transition-colors border flex items-start gap-3",
-                        unread
-                          ? "bg-primary/10 text-foreground border-primary/30 hover:bg-primary/15"
-                          : "hover:bg-muted/60 border-transparent",
+                        isUnread ? "bg-primary/10 text-foreground border-primary/30 hover:bg-primary/15" : "hover:bg-muted/60 border-transparent",
                       ].join(" ")}
                     >
-                      <div className="mt-0.5 h-2 w-2 rounded-full" style={{ background: unread ? "hsl(var(--primary))" : "transparent" }} />
+                      <div className="mt-0.5 h-2 w-2 rounded-full" style={{ background: isUnread ? "hsl(var(--primary))" : "transparent" }} />
                       <div className="flex-1 min-w-0">
                         <div className="font-medium truncate">{n.title}</div>
-                        {n.description ? (
-                          <div className="text-xs text-muted-foreground line-clamp-2">{n.description}</div>
-                        ) : null}
+                        {n.description ? <div className="text-xs text-muted-foreground line-clamp-2">{n.description}</div> : null}
                         <div className="text-[10px] text-muted-foreground mt-1">{formatPTDate(n.created_at)}</div>
                       </div>
                     </motion.button>
@@ -276,9 +265,7 @@ const useCommandPalette = (items: CommandItem[]) => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isK = e.key.toLowerCase() === "k";
-      if ((e.metaKey || e.ctrlKey) && isK) {
-        e.preventDefault(); setOpen((v) => !v);
-      }
+      if ((e.metaKey || e.ctrlKey) && isK) { e.preventDefault(); setOpen((v) => !v); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -313,6 +300,24 @@ export default function StudentLayout() {
   const [notifs, setNotifs] = useState<UINotification[]>([]);
   const unreadCount = useMemo(() => notifs.filter((n) => !n.read_at).length, [notifs]);
 
+  // sessão & perfil
+  const [loading, setLoading] = useState(true);
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // switcher modal
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+
+  // bloqueio de scroll quando modal aberto
+  useEffect(() => {
+    document.body.style.overflow = switcherOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [switcherOpen]);
+
+  /* --------- Notificações --------- */
   async function loadNotifications(uid: string) {
     const { data } = await supabase
       .from("notifications")
@@ -322,12 +327,10 @@ export default function StudentLayout() {
       .limit(30);
     if (data) setNotifs(data as UINotification[]);
   }
-
   async function markAsRead(id: string) {
     setNotifs((arr) => arr.map((n) => (n.id === id && !n.read_at ? { ...n, read_at: new Date().toISOString() } : n)));
     await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("id", id);
   }
-
   async function markAllAsRead() {
     const ids = notifs.filter((n) => !n.read_at).map((n) => n.id);
     if (ids.length === 0) return;
@@ -335,44 +338,16 @@ export default function StudentLayout() {
     setNotifs((arr) => arr.map((n) => (!n.read_at ? { ...n, read_at: ts } : n)));
     await supabase.from("notifications").update({ read_at: ts }).in("id", ids);
   }
-
   function onNotificationClick(n: UINotification) {
     markAsRead(n.id);
     setNotifOpen(false);
     if (n.action_url) navigate(n.action_url);
   }
 
-  // report
-  const [reportOpen, setReportOpen] = useState(false);
-  const [reportCategory, setReportCategory] = useState("Erro técnico");
-  const [reportText, setReportText] = useState("");
-
-  // sessão & perfil
-  const [loading, setLoading] = useState(true);
-  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
-  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
-
-  // iniciais & display
-  const initials = useMemo(() => {
-    const base =
-      activeProfile?.full_name?.trim() ||
-      activeProfile?.username?.trim() ||
-      (sessionEmail ? sessionEmail.split("@")[0] : "");
-    if (!base) return "AL";
-    const parts = base.split(/\s+/).filter(Boolean);
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }, [activeProfile, sessionEmail]);
-
-  const displayName =
-    activeProfile?.full_name ||
-    activeProfile?.username ||
-    (sessionEmail ? sessionEmail.split("@")[0] : "Árvore do Conhecimento");
-
-  // carregar perfil ativo validando ownership
+  /* --------- Perfil ativo --------- */
   const loadActiveProfile = async (uid: string): Promise<Profile | null> => {
     const storedNew = localStorage.getItem("active_profile_id");
-    const storedLegacy = localStorage.getItem("activeProfileId");
+       const storedLegacy = localStorage.getItem("activeProfileId");
     const storedId = storedNew || storedLegacy;
 
     if (storedId) {
@@ -384,7 +359,7 @@ export default function StudentLayout() {
         .maybeSingle();
       if (byId) return byId as Profile;
 
-      // limpar legacy + novas
+      // limpar se inválido
       localStorage.removeItem("activeProfileId");
       localStorage.removeItem("activeUsername");
       localStorage.removeItem("activeFullName");
@@ -404,28 +379,61 @@ export default function StudentLayout() {
     return null;
   };
 
-  // sessão + perfil + NOTIFS realtime
+  // abrir modal e carregar perfis (sem sair da página)
+  const openProfileSwitcher = useCallback(async () => {
+    if (!userId) return;
+    setSwitcherOpen(true);
+    setLoadingProfiles(true);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, username, email, auth_user_id, level, updated_at")
+      .eq("auth_user_id", userId)
+      .order("updated_at", { ascending: false });
+    if (!error && data) setProfiles(data as Profile[]);
+    setLoadingProfiles(false);
+  }, [userId]);
+
+  // escolher perfil
+  const handlePickProfile = (p: Profile) => {
+    setActiveProfile(p);
+    localStorage.setItem("active_profile_id", p.id);
+    localStorage.setItem("activeProfileId", p.id);
+    localStorage.setItem("activeUsername", p.username);
+    localStorage.setItem("activeFullName", p.full_name ?? "");
+    setSwitcherOpen(false);
+    toast.push(`Trocaste para ${p.full_name || p.username}.`, 2500);
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    localStorage.removeItem("activeProfileId");
+    localStorage.removeItem("activeUsername");
+    localStorage.removeItem("activeFullName");
+    localStorage.removeItem("active_profile_id");
+    localStorage.removeItem("active_profile_username");
+    localStorage.removeItem("active_profile_name");
+    navigate("/");
+  };
+
+  /* --------- Sessão + inicialização --------- */
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       const { data: sess } = await supabase.auth.getSession();
       const user = sess?.session?.user;
-
       if (!user) { navigate("/"); return; }
 
       setSessionEmail(user.email ?? null);
+      setUserId(user.id);
 
-      // carregar perfil
       const profile = await loadActiveProfile(user.id);
       if (cancelled) return;
       if (!profile) { navigate("/setup"); return; }
       setActiveProfile(profile);
 
-      // carregar notificações
       await loadNotifications(user.id);
 
-      // subscrição realtime a novas notifs
       const channel = supabase
         .channel(`notif-user-${user.id}`)
         .on(
@@ -434,7 +442,6 @@ export default function StudentLayout() {
           (payload) => {
             const n = payload.new as UINotification;
             setNotifs((arr) => [n, ...arr].slice(0, 30));
-            // toast lateral com progress
             toast.push(n.title);
           }
         )
@@ -455,30 +462,30 @@ export default function StudentLayout() {
     })();
   }, [navigate]); // eslint-disable-line
 
-  const handleSwitchProfile = () => {
-    localStorage.removeItem("activeProfileId");
-    localStorage.removeItem("activeUsername");
-    localStorage.removeItem("activeFullName");
-    localStorage.removeItem("active_profile_id");
-    localStorage.removeItem("active_profile_username");
-    localStorage.removeItem("active_profile_name");
-    localStorage.setItem("forcePickProfile", "1");
-    navigate("/");
-  };
+  // iniciais & display
+  const initials = useMemo(() => {
+    const base =
+      activeProfile?.full_name?.trim() ||
+      activeProfile?.username?.trim() ||
+      (sessionEmail ? sessionEmail.split("@")[0] : "");
+    if (!base) return "AL";
+    const parts = base.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }, [activeProfile, sessionEmail]);
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    localStorage.removeItem("activeProfileId");
-    localStorage.removeItem("activeUsername");
-    localStorage.removeItem("activeFullName");
-    localStorage.removeItem("active_profile_id");
-    localStorage.removeItem("active_profile_username");
-    localStorage.removeItem("active_profile_name");
-    navigate("/");
-  };
+  const displayName =
+    activeProfile?.full_name ||
+    activeProfile?.username ||
+    (sessionEmail ? sessionEmail.split("@")[0] : "Árvore do Conhecimento");
+
+  // report
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportCategory, setReportCategory] = useState("Erro técnico");
+  const [reportText, setReportText] = useState("");
 
   // Command Palette (rotas principais + ações)
-  const commandItems = useMemo(
+  const commandItems = useMemo<CommandItem[]>(
     () => [
       { label: "Dashboard", to: "/aluno", icon: <Home className="h-4 w-4" /> },
       { label: "Aulas", to: "/aluno/aulas", icon: <Calendar className="h-4 w-4" /> },
@@ -492,10 +499,10 @@ export default function StudentLayout() {
       { label: "Ajuda", to: "/ajuda", icon: <HelpCircle className="h-4 w-4" /> },
       { label: "Suporte", to: "/suporte", icon: <LifeBuoy className="h-4 w-4" /> },
       { label: "Abrir chat de suporte", action: () => setChatOpen(true), icon: <MessageCircle className="h-4 w-4" /> },
-      { label: "Trocar de perfil", action: handleSwitchProfile, icon: <ArrowLeftRight className="h-4 w-4" /> },
+      { label: "Trocar de perfil", action: openProfileSwitcher, icon: <ArrowLeftRight className="h-4 w-4" /> },
       { label: "Sair", action: handleSignOut, icon: <LogOut className="h-4 w-4" /> },
     ],
-    [] // eslint-disable-line
+    [openProfileSwitcher] // eslint-disable-line
   );
   const palette = useCommandPalette(commandItems);
 
@@ -576,10 +583,7 @@ export default function StudentLayout() {
                     </button>
                   </DropdownMenuTrigger>
 
-                  <DropdownMenuContent
-                    align="end"
-                    className="z-50 bg-popover min-w-[260px] border-border"
-                  >
+                  <DropdownMenuContent align="end" className="z-50 bg-popover min-w-[260px] border-border">
                     <DropdownMenuLabel className="pb-2">
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
@@ -630,7 +634,8 @@ export default function StudentLayout() {
                       </Link>
                     </DropdownMenuItem>
 
-                    <DropdownMenuItem onClick={handleSwitchProfile} className="flex items-center gap-2">
+                    {/* Trocar de perfil → abre modal full-screen */}
+                    <DropdownMenuItem onClick={openProfileSwitcher} className="flex items-center gap-2">
                       <ArrowLeftRight className="h-4 w-4" />
                       <span>Trocar de perfil</span>
                     </DropdownMenuItem>
@@ -643,6 +648,7 @@ export default function StudentLayout() {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+
               </div>
             </div>
           </motion.header>
@@ -682,18 +688,8 @@ export default function StudentLayout() {
 
         {/* Chat flutuante com IA */}
         <AnimatePresence>{chatOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] pointer-events-none"
-          >
-            {/* overlay clicável */}
-            <div
-              className="absolute inset-0 bg-background/20 backdrop-blur-[1px] pointer-events-auto"
-              onClick={() => setChatOpen(false)}
-            />
-            {/* content */}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] pointer-events-none">
+            <div className="absolute inset-0 bg-background/20 backdrop-blur-[1px] pointer-events-auto" onClick={() => setChatOpen(false)} />
             <div className="absolute right-4 bottom-20 sm:bottom-24 pointer-events-auto">
               <AssistantChat compact />
             </div>
@@ -704,9 +700,7 @@ export default function StudentLayout() {
         <Dialog open={reportOpen} onOpenChange={setReportOpen}>
           <DialogContent className="max-w-md rounded-2xl shadow-2xl border border-border bg-popover">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-lg">
-                Reportar erro
-              </DialogTitle>
+              <DialogTitle className="flex items-center gap-2 text-lg">Reportar erro</DialogTitle>
             </DialogHeader>
             <form
               className="flex flex-col gap-4 mt-2"
@@ -789,6 +783,121 @@ export default function StudentLayout() {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* ============== MODAL FULL-PAGE: Trocar de perfil (centrado) ============== */}
+        <AnimatePresence>
+          {switcherOpen && (
+            <motion.div className="fixed inset-0 z-[70]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              {/* Fundo aurora + blur */}
+              <motion.div
+                className="absolute inset-0"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                style={{
+                  background:
+                    "radial-gradient(1000px 600px at 20% -10%, rgba(99,102,241,.35), transparent 60%), radial-gradient(1000px 600px at 80% 110%, rgba(165,180,252,.35), transparent 60%), linear-gradient(120deg, #0b1020 0%, #0c1230 100%)",
+                  filter: "saturate(1.2)",
+                }}
+              />
+              <div className="absolute inset-0 backdrop-blur-[10px]" />
+
+              {/* Botão fechar (cruz animada) */}
+              <motion.button
+                onClick={() => setSwitcherOpen(false)}
+                whileHover={{ rotate: 90, scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                aria-label="Fechar seleção de perfil"
+                className="absolute top-4 right-4 sm:top-6 sm:right-6 h-10 w-10 rounded-full bg-white/10 hover:bg-white/15 text-white grid place-items-center border border-white/20"
+              >
+                <X className="h-5 w-5" />
+              </motion.button>
+
+              {/* Conteúdo centrado */}
+              <motion.div
+                className="relative h-full w-full flex items-center justify-center px-4 sm:px-8"
+                initial={{ y: 16, opacity: 0 }}
+                animate={{ y: 0, opacity: 1, transition: { type: "spring", stiffness: 110, damping: 20 } }}
+                exit={{ y: 12, opacity: 0 }}
+              >
+                <div className="w-full max-w-6xl">
+                  {/* Título centrado */}
+                  <h2 className="text-center text-white font-semibold text-xl sm:text-2xl mb-6 select-none">
+                    Quem vai estudar?
+                  </h2>
+
+                  {/* Carrossel horizontal (sem setas), centrado */}
+                  <div
+                    id="profiles-row"
+                    className="flex gap-4 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-2 pr-2 mx-auto justify-center"
+                    style={{ scrollbarWidth: "none" }}
+                  >
+                    {loadingProfiles ? (
+                      Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="snap-start shrink-0 w-[260px] h-[120px] rounded-2xl bg-white/10 border border-white/10 animate-pulse" />
+                      ))
+                    ) : profiles.length === 0 ? (
+                      <div className="text-white/90">
+                        Ainda não tens perfis.{" "}
+                        <button onClick={() => { setSwitcherOpen(false); navigate("/setup"); }} className="underline">
+                          Criar perfil
+                        </button>
+                      </div>
+                    ) : (
+                      profiles.map((p) => {
+                        const isActive = p.id === activeProfile?.id;
+                        const initials =
+                          (p.full_name || p.username || "U")
+                            .split(" ")
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((s) => s[0]?.toUpperCase())
+                            .join("") || "U";
+
+                        return (
+                          <motion.button
+                            key={p.id}
+                            whileHover={{ y: -2, scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handlePickProfile(p)}
+                            className={`snap-start shrink-0 w-[260px] h-[120px] rounded-2xl border text-left overflow-hidden transition relative ${
+                              isActive ? "border-white/40 bg-white/15" : "border-white/15 bg-white/8 hover:bg-white/15"
+                            }`}
+                            style={{ boxShadow: "0 10px 30px rgba(0,0,0,0.15)" }}
+                            title={p.full_name || p.username}
+                          >
+                            {/* brilho interno */}
+                            <div className="pointer-events-none absolute -inset-10 opacity-0 hover:opacity-100 transition">
+                              <div className="absolute -top-16 -left-16 h-40 w-40 rounded-full bg-indigo-400/20 blur-2xl" />
+                              <div className="absolute -bottom-16 -right-16 h-40 w-40 rounded-full bg-violet-300/20 blur-2xl" />
+                            </div>
+
+                            <div className="relative h-full flex items-center gap-3 px-4">
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/20 text-white text-lg font-semibold">
+                                {initials}
+                              </div>
+                              <div className="min-w-0 text-white">
+                                <div className="font-semibold truncate">{p.full_name || p.username}</div>
+                                <div className="text-xs text-white/80 truncate">
+                                  @{p.username}{p.level != null ? ` · Nível ${p.level}` : ""}
+                                </div>
+                              </div>
+                              {isActive && (
+                                <div className="ml-auto text-emerald-300">
+                                  <Check className="h-5 w-5" />
+                                </div>
+                              )}
+                            </div>
+                          </motion.button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Utils visuais */}
         <style dangerouslySetInnerHTML={{ __html: UTILS_CSS }} />
