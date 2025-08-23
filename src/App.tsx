@@ -11,6 +11,7 @@ import '@vidstack/react/player/styles/base.css';
 // Páginas (lazy)
 const Index = lazy(() => import("./pages/Index"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const Intro = lazy(() => import("./pages/Intro"));
 
 // Student pages
 const StudentLayout = lazy(() => import("./layouts/StudentLayout"));
@@ -50,70 +51,73 @@ const queryClient = new QueryClient();
 
 const Loader = () => (
   <div
-    className="fixed inset-0 z-50 grid place-items-center bg-background/60 backdrop-blur-xl"
-    role="status"
-    aria-live="polite"
-    aria-busy="true"
-  >
-    {/* aurora suave */}
+  className="fixed inset-0 z-50 grid place-items-center bg-background/60 backdrop-blur-xl"
+  role="status"
+  aria-live="polite"
+  aria-busy="true"
+>
+  {/* aurora suave */}
+  <div
+    className="absolute -inset-20 blur-3xl opacity-60"
+    style={{ backgroundImage: "var(--gradient-hero)" }}
+    aria-hidden
+  />
+
+  <div className="relative h-28 w-28">
+    {/* anel principal com gradiente (vidro + glow) */}
     <div
-      className="absolute -inset-20 blur-3xl opacity-60"
-      style={{ backgroundImage: "var(--gradient-hero)" }}
+      className="absolute inset-0 rounded-full animate-[spin_1.1s_linear_infinite] motion-reduce:animate-none"
+      style={{
+        backgroundImage: "var(--gradient-hero)",
+        WebkitMask:
+          "radial-gradient(farthest-side, transparent 58%, #000 60%)",
+        mask: "radial-gradient(farthest-side, transparent 58%, #000 60%)",
+        filter: "drop-shadow(0 10px 30px rgba(0,0,0,.35))",
+      }}
       aria-hidden
     />
 
-    <div className="relative h-28 w-28">
-      {/* anel principal com gradiente (vidro + glow) */}
-      <div
-        className="absolute inset-0 rounded-full animate-[spin_1.1s_linear_infinite] motion-reduce:animate-none"
-        style={{
-          backgroundImage: "var(--gradient-hero)",
-          WebkitMask:
-            "radial-gradient(farthest-side, transparent 58%, #000 60%)",
-          mask: "radial-gradient(farthest-side, transparent 58%, #000 60%)",
-          filter: "drop-shadow(0 10px 30px rgba(0,0,0,.35))",
-        }}
-        aria-hidden
+    {/* anel interior fino (contra-rotação) */}
+    <div
+      className="absolute inset-3 rounded-full animate-[spin_1.3s_linear_infinite_reverse] opacity-70 motion-reduce:animate-none"
+      style={{
+        backgroundImage: "var(--gradient-hero)",
+        WebkitMask:
+          "radial-gradient(farthest-side, transparent 72%, #000 74%)",
+        mask: "radial-gradient(farthest-side, transparent 72%, #000 74%)",
+        boxShadow: "var(--shadow-elegant)",
+      }}
+      aria-hidden
+    />
+
+    {/* satélites em órbita */}
+    <div className="absolute inset-0 animate-[spin_2.2s_linear_infinite] motion-reduce:animate-none" aria-hidden>
+      <span
+        className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 shadow-md"
+        style={{ transform: "translate(-50%, -50%) translateY(-46px)" }}
       />
-
-      {/* anel interior fino (contra-rotação) */}
-      <div
-        className="absolute inset-3 rounded-full animate-[spin_1.3s_linear_infinite_reverse] opacity-70 motion-reduce:animate-none"
-        style={{
-          backgroundImage: "var(--gradient-hero)",
-          WebkitMask:
-            "radial-gradient(farthest-side, transparent 72%, #000 74%)",
-          mask: "radial-gradient(farthest-side, transparent 72%, #000 74%)",
-          boxShadow: "var(--shadow-elegant)",
-        }}
-        aria-hidden
+      <span
+        className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80 shadow"
+        style={{ transform: "translate(-50%, -50%) rotate(120deg) translateY(-46px)" }}
       />
-
-      {/* satélites em órbita */}
-      <div className="absolute inset-0 animate-[spin_2.2s_linear_infinite] motion-reduce:animate-none" aria-hidden>
-        {/* 0° */}
-        <span
-          className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 shadow-md"
-          style={{ transform: "translate(-50%, -50%) translateY(-46px)" }}
-        />
-        {/* 120° */}
-        <span
-          className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80 shadow"
-          style={{ transform: "translate(-50%, -50%) rotate(120deg) translateY(-46px)" }}
-        />
-        {/* 240° */}
-        <span
-          className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/70 shadow"
-          style={{ transform: "translate(-50%, -50%) rotate(240deg) translateY(-46px)" }}
-        />
-      </div>
-
-      {/* núcleo em vidro */}
-      <div className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-white/10 backdrop-blur-2xl shadow-[var(--shadow-elegant)]" />
+      <span
+        className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/70 shadow"
+        style={{ transform: "translate(-50%, -50%) rotate(240deg) translateY(-46px)" }}
+      />
     </div>
 
-    <span className="sr-only">A carregar…</span>
+    {/* núcleo com logotipo */}
+    <div className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-white/10 backdrop-blur-2xl shadow-[var(--shadow-elegant)] flex items-center justify-center overflow-hidden">
+      <img
+        src="https://qzvikwxwvwmngbnyxpwr.supabase.co/storage/v1/object/sign/static/logo_cores.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lODBjMDg3My1kM2U4LTQ5OWMtODczNy0xYWRlMDUwMGUxNGMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJzdGF0aWMvbG9nb19jb3Jlcy5wbmciLCJpYXQiOjE3NTU5NjIzOTAsImV4cCI6MTc4NzQ5ODM5MH0.Ly40AcA7GdZLXriGVuRbNRcIoPdoPORVmIY93az-Fpg"
+        alt="Logo"
+        className="h-8 w-8 object-contain"
+      />
+    </div>
   </div>
+
+  <span className="sr-only">A carregar…</span>
+</div>
 );
 
 
@@ -158,6 +162,7 @@ export default function App() {
                 <Route path="/recuperar-password" element={<Recuperar />} />
                 <Route path="/setup" element={<Setup />} />
                 <Route path="/auth" element={<Index />} />
+                <Route path="/introduction" element={<Intro />} />
 
                 
 

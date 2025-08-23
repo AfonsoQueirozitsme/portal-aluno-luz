@@ -544,33 +544,51 @@ export default function Setup() {
       return;
     }
 
-    // STEP 4 → Regulamento: só concluir se hasCompletedPdf
-    if (step === 4) {
-      if (!hasCompletedPdf) {
-        setError("Lê o regulamento até ao fim para poderes concluir.");
-        return;
-      }
-      setLoading(true);
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const userId = sessionData?.session?.user?.id;
-        if (!userId) throw new Error("Sessão inválida.");
-
-        const { error: upErr } = await supabase
-          .from("profiles")
-          .update({ setup_complete: true })
-          .eq("auth_user_id", userId);
-
-        if (upErr) throw upErr;
-
-        navigate("/aluno");
-      } catch (e: any) {
-        setError(e?.message ?? "Não foi possível concluir a configuração.");
-      } finally {
-        setLoading(false);
-      }
+  // STEP 4 → Regulamento: só concluir se hasCompletedPdf
+  if (step === 4) {
+    if (!hasCompletedPdf) {
+      setError("Lê o regulamento até ao fim para poderes concluir.");
+      return;
     }
-  };
+    setLoading(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id;
+      if (!userId) throw new Error("Sessão inválida.");
+
+      // marca setup_complete
+      const { error: upErr } = await supabase
+        .from("profiles")
+        .update({ setup_complete: true })
+        .eq("auth_user_id", userId);
+      if (upErr) throw upErr;
+
+      // 👉 nome do Supabase Auth (user_metadata)
+      const { data: userResp, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw userErr;
+
+      const md: any = userResp.user?.user_metadata || {};
+      const rawName =
+        md.full_name ||
+        md.name ||
+        [md.given_name, md.family_name].filter(Boolean).join(" ") ||
+        (userResp.user?.email ? userResp.user.email.split("@")[0] : "") ||
+        "Encarregado de Educação";
+
+      // espaços como '+' e restantes percent-encoded
+      const encoded = encodeURIComponent(rawName).replace(/%20/g, "+");
+
+      navigate(`/introduction?name=${encoded}`);
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message ?? "Não foi possível concluir a configuração.");
+    } finally {
+      setLoading(false);
+    }
+  }
+}; // 👈 fecha o handleNext
+
+
 
   // Stripe helpers (opcional)
   const handleStripeSetup = async () => {
