@@ -185,18 +185,19 @@ export default function Landing() {
             </motion.p>
 
             {/* quadrado de scroll — muito pequeno, MESMO no fundo centrado */}
-            <button
-              onClick={() => scrollToId("sobre")}
-              className="group absolute left-1/2 -translate-x-1/2 bottom-1 sm:bottom-2 grid place-items-center"
-              aria-label="Scroll para a próxima secção"
-              title="Desliza"
-            >
-              <span
-                className="block h-2 w-2 rounded-[4px] border border-primary/60 bg-primary/30 group-hover:bg-primary/50 transition"
-                style={{ animation: "pulseRing 2.4s ease-out infinite" }}
-              />
-              <ChevronDown className="h-4 w-4 mt-1 text-muted-foreground group-hover:text-primary transition" />
-            </button>
+<button
+  onClick={() => scrollToId("sobre")}
+  className="group absolute left-1/2 -translate-x-1/2 bottom-[2px] sm:bottom-[6px] grid place-items-center"
+  aria-label="Scroll para a próxima secção"
+  title="Desliza"
+>
+  <span
+    className="block h-2 w-2 rounded-[4px] border border-primary/60 bg-primary/30 group-hover:bg-primary/50 transition"
+    style={{ animation: "pulseRing 2.4s ease-out infinite" }}
+  />
+  <ChevronDown className="h-4 w-4 mt-1 text-muted-foreground group-hover:text-primary transition" />
+</button>
+
           </motion.div>
         </section>
 
@@ -291,15 +292,15 @@ export default function Landing() {
             <div className="mt-8 grid sm:grid-cols-2 gap-5 place-items-center">
               {[
                 {
-                  name: "Ana Martins",
+                  name: "Margarida",
                   role: "Co-fundadora · Matemática",
                   img: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=800&auto=format&fit=crop",
                   bio: "15 anos a preparar alunos para exames nacionais.",
                   links: { linkedin: "#", instagram: "#" },
                 },
                 {
-                  name: "Joana Pereira",
-                  role: "Co-fundadora · Ciências & Estudo",
+                  name: "Sílvia",
+                  role: "Co-fundadora · Línguas & Estudo",
                   img: "https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?q=80&w=800&auto=format&fit=crop",
                   bio: "Técnicas de estudo e organização para resultados sustentáveis.",
                   links: { linkedin: "#", instagram: "#" },
@@ -314,9 +315,9 @@ export default function Landing() {
                   viewport={{ once: true }}
                   className="relative w-full max-w-sm overflow-hidden rounded-xl border bg-card"
                 >
-                  <div className="aspect-[5/4] overflow-hidden">
+                  {/* <div className="aspect-[5/4] overflow-hidden">
                     <img src={f.img} alt={f.name} className="h-full w-full object-cover transition duration-500 hover:scale-105" />
-                  </div>
+                  </div> */}
                   <div className="p-4">
                     <div className="flex items-center justify-between">
                       <div className="text-left">
