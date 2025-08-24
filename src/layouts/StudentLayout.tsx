@@ -447,7 +447,6 @@ export default function StudentLayout() {
         .subscribe();
 
       setLoading(false);
-      setTimeout(() => toast.push("Bem-vindo de volta!"), 300);
 
       const { data: sub } = supabase.auth.onAuthStateChange((event) => {
         if (event === "SIGNED_OUT") navigate("/");

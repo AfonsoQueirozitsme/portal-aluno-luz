@@ -1,4 +1,3 @@
-// file: src/pages/WelcomeCinematic.tsx
 import { useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { gsap } from "gsap";
@@ -11,9 +10,13 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
 
   // roots
   const stage = useRef<HTMLDivElement>(null);
-  const nebulaA = useRef<HTMLDivElement>(null);
-  const nebulaB = useRef<HTMLDivElement>(null);
   const starfield = useRef<HTMLCanvasElement>(null);
+
+  // aurora / blobs
+  const aurora1 = useRef<HTMLDivElement>(null);
+  const aurora2 = useRef<HTMLDivElement>(null);
+  const blob1 = useRef<HTMLDivElement>(null);
+  const blob2 = useRef<HTMLDivElement>(null);
 
   // scene blocks (aparecem no MESMO sítio)
   const l1 = useRef<HTMLDivElement>(null);
@@ -35,17 +38,27 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
     return name ?? q ?? "Encarregado de Educação";
   }, [name, params]);
 
-  // split por letra (aplicar APENAS no elemento do texto)
+  // split por palavra -> depois letras (para não partir palavras em linhas)
   const split = (el?: HTMLElement | null) => {
     if (!el) return;
-    const t = el.innerText;
+    const text = el.innerText;
     el.innerHTML = "";
-    for (const ch of t) {
-      const s = document.createElement("span");
-      s.textContent = ch;
-      s.style.display = "inline-block";
-      s.style.whiteSpace = ch === " " ? "pre" : "normal";
-      el.appendChild(s);
+    const tokens = text.split(/(\s+)/); // preserva espaços como tokens
+    for (const tok of tokens) {
+      if (/^\s+$/.test(tok)) {
+        el.appendChild(document.createTextNode(tok));
+      } else if (tok.length) {
+        const word = document.createElement("span");
+        word.style.display = "inline-block";
+        word.style.whiteSpace = "nowrap"; // mantém a palavra inteira
+        for (const ch of tok) {
+          const s = document.createElement("span");
+          s.textContent = ch;
+          s.style.display = "inline-block";
+          word.appendChild(s);
+        }
+        el.appendChild(word);
+      }
     }
   };
 
@@ -62,7 +75,7 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
     split(t3.current!);
 
     const ctx = gsap.context((self) => {
-      /* ===== STARFIELD (galaxy) ===== */
+      /* ===== STARFIELD (suave) ===== */
       if (!prefersReduced && starfield.current) {
         const c = starfield.current;
         const cx = c.getContext("2d")!;
@@ -70,18 +83,18 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
         let h = (c.height = c.offsetHeight * devicePixelRatio);
 
         type Star = { x: number; y: number; z: number; r: number; t: number; s: number };
-        const stars: Star[] = Array.from({ length: 220 }, () => ({
+        const stars: Star[] = Array.from({ length: 140 }, () => ({
           x: Math.random() * w,
           y: Math.random() * h,
-          z: Math.random() * 0.7 + 0.3, // profundidade
-          r: Math.random() * 1.7 + 0.3, // raio
-          t: Math.random() * Math.PI * 2, // fase para “twinkle”
-          s: Math.random() * 0.6 + 0.2, // velocidade
+          z: Math.random() * 0.7 + 0.3,
+          r: Math.random() * 1.4 + 0.2,
+          t: Math.random() * Math.PI * 2,
+          s: Math.random() * 0.5 + 0.15,
         }));
 
         const onResize = () => {
-          w = c.width = c.offsetWidth * devicePixelRatio;
-          h = c.height = c.offsetHeight * devicePixelRatio;
+          w = (c.width = c.offsetWidth * devicePixelRatio);
+          h = (c.height = c.offsetHeight * devicePixelRatio);
         };
         window.addEventListener("resize", onResize);
         self.add(() => window.removeEventListener("resize", onResize));
@@ -92,14 +105,14 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
           cx.clearRect(0, 0, w, h);
           cx.globalCompositeOperation = "lighter";
           for (const st of stars) {
-            st.x += (0.15 + st.z * 0.25) * devicePixelRatio;
+            st.x += (0.12 + st.z * 0.18) * devicePixelRatio;
             if (st.x > w + 20) st.x = -20;
             st.t += 0.02 + st.z * 0.01;
-            const tw = 0.55 + Math.sin(st.t) * 0.45; // cintilar
-            cx.globalAlpha = 0.25 + 0.55 * tw * st.z;
+            const tw = 0.55 + Math.sin(st.t) * 0.45;
+            cx.globalAlpha = 0.15 + 0.5 * tw * st.z;
             cx.beginPath();
             cx.arc(st.x, st.y, st.r * devicePixelRatio, 0, Math.PI * 2);
-            cx.fillStyle = "rgba(255,255,255,0.95)";
+            cx.fillStyle = "rgba(255,255,255,0.9)";
             cx.fill();
           }
         };
@@ -107,17 +120,25 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
         self.add(() => cancelAnimationFrame(raf));
       }
 
-      /* ===== Nébulas a “respirar” (parallax suave) ===== */
-      if (!prefersReduced && nebulaA.current && nebulaB.current) {
-        gsap.to([nebulaA.current, nebulaB.current], {
-          xPercent: (i) => (i ? 10 : -8),
+      /* ===== Aurora / blobs com GSAP (parallax respirando) ===== */
+      if (!prefersReduced && aurora1.current && aurora2.current && blob1.current && blob2.current) {
+        gsap.to([aurora1.current, aurora2.current], {
+          xPercent: (i) => (i ? 8 : -6),
           yPercent: (i) => (i ? -6 : 8),
-          scale: (i) => (i ? 1.04 : 1.03),
-          duration: 8,
+          duration: 10,
           ease: "sine.inOut",
           yoyo: true,
           repeat: -1,
           stagger: 0.3,
+        });
+        gsap.to([blob1.current, blob2.current], {
+          scale: (i) => (i ? 1.06 : 1.04),
+          rotate: (i) => (i ? 8 : -6),
+          duration: 12,
+          ease: "sine.inOut",
+          yoyo: true,
+          repeat: -1,
+          stagger: 0.25,
         });
       }
 
@@ -126,7 +147,7 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
 
       const typeIn = (el: HTMLElement, dur = 1.0, stagger = 0.02) =>
         gsap.from(el.querySelectorAll("span"), {
-          y: 28,
+          y: 26,
           opacity: 0,
           rotateX: -35,
           transformOrigin: "0 100%",
@@ -147,7 +168,7 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
         tl.fromTo(
           flare.current,
           { xPercent: -140, opacity: 0 },
-          { xPercent: 120, opacity: 0.45, duration: 0.9, ease: "power2.inOut" },
+          { xPercent: 120, opacity: 0.55, duration: 0.9, ease: "power2.inOut" },
           0.05
         );
       }
@@ -164,25 +185,24 @@ export default function WelcomeCinematic({ name, nextHref = "/aluno" }: Props) {
         .to({}, { duration: 2.1 })
         .add(() => hideOut(l2.current!), ">");
 
-      // 3) Começa aqui uma jornada…
+      // 3) Começa aqui uma jornada… (fica mais tempo)
       tl.to(l3.current, { autoAlpha: 1, duration: 0.01 }, ">0.2")
         .add(() => typeIn(t3.current!, 1.0, 0.018), ">")
-        .to({}, { duration: 2.4 })
-        .add(() => hideOut(l3.current!), ">");
+        .to({}, { duration: 3.6 })
+        .add(() => hideOut(l3.current!), ">")
 
-    // 4) Pronto? (botão único) + auto-avanço
-tl.to(ready.current, { autoAlpha: 1, scale: 1, duration: 0.8, ease: "power3.out" }, ">0.3")
-.fromTo(
-  ready.current!.querySelector("button"),
-  { scale: 0.9, opacity: 0 },
-  { scale: 1, opacity: 1, duration: 0.6, ease: "back.out(1.7)" },
-  "<"
-)
-.add(() => {
-  const to = setTimeout(() => navigate(nextHref), 3000);
-  self.add(() => clearTimeout(to));
-});
-
+        // 4) PRONTO? (botão) + auto-avanço 2s
+        .to(ready.current, { autoAlpha: 1, scale: 1, duration: 0.8, ease: "power3.out" }, ">0.3")
+        .fromTo(
+          ready.current!.querySelector("button"),
+          { scale: 0.9, opacity: 0 },
+          { scale: 1, opacity: 1, duration: 0.6, ease: "back.out(1.7)" },
+          "<"
+        )
+        .add(() => {
+          const to = setTimeout(() => navigate(nextHref), 2000); // 2s auto-redirect
+          self.add(() => clearTimeout(to));
+        });
 
       // atalhos
       const onKey = (e: KeyboardEvent) => {
@@ -200,77 +220,122 @@ tl.to(ready.current, { autoAlpha: 1, scale: 1, duration: 0.8, ease: "power3.out"
   }, [fullName, navigate, nextHref]);
 
   return (
-    <div ref={stage} className="relative min-h-dvh overflow-hidden bg-black">
-      {/* letterbox para look cinema */}
-      <div className="fixed inset-x-0 top-0 z-50 h-10 bg-black/85" />
-      <div className="fixed inset-x-0 bottom-0 z-50 h-10 bg-black/85" />
+    <div
+      ref={stage}
+      className="relative min-h-dvh overflow-hidden bg-gradient-to-br from-violet-600/20 via-fuchsia-500/10 to-emerald-500/10"
+    >
+      {/* camada de aurora / blobs animados */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        {/* aurora */}
+        <div
+          ref={aurora1}
+          className="absolute -top-40 -left-32 h-[55rem] w-[55rem] rounded-full blur-3xl opacity-60 mix-blend-screen"
+          style={{ background: "radial-gradient(50% 50% at 50% 50%, rgba(124,58,237,.45), transparent 70%)" }}
+        />
+        <div
+          ref={aurora2}
+          className="absolute -bottom-52 -right-32 h-[60rem] w-[60rem] rounded-full blur-3xl opacity-50 mix-blend-screen"
+          style={{ background: "radial-gradient(50% 50% at 50% 50%, rgba(16,185,129,.35), transparent 70%)" }}
+        />
 
-      {/* nébulas (galaxy) */}
-      <div
-        ref={nebulaA}
-        className="pointer-events-none absolute -left-64 -top-64 h-[70rem] w-[70rem] rounded-full blur-3xl opacity-50"
-        style={{ backgroundImage: "var(--gradient-hero)" }}
-      />
-      <div
-        ref={nebulaB}
-        className="pointer-events-none absolute -right-72 -bottom-72 h-[70rem] w-[70rem] rounded-full blur-3xl opacity-40"
-        style={{ backgroundImage: "var(--gradient-hero)" }}
-      />
+        {/* blobs de vidro coloridos */}
+        <div
+          ref={blob1}
+          className="absolute left-[8%] top-[35%] h-56 w-56 sm:h-72 sm:w-72 rounded-[40%_60%_60%_40%/60%_40%_60%_40%] bg-white/40 backdrop-blur-xl border border-white/30 shadow-2xl"
+        />
+        <div
+          ref={blob2}
+          className="absolute right-[6%] bottom-[16%] h-52 w-52 sm:h-64 sm:w-64 rounded-[60%_40%_40%_60%/40%_60%_40%_60%] bg-white/30 backdrop-blur-xl border border-white/30 shadow-2xl"
+        />
 
-      {/* starfield */}
-      <canvas ref={starfield} className="absolute inset-0 -z-10 h-full w-full" />
+        {/* grão suave */}
+        <div
+          className="absolute inset-0 opacity-[.06]"
+          style={{
+            backgroundImage: `url("data:image/svg+xml;utf8,${encodeURIComponent(
+              `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160">
+                 <filter id="n">
+                   <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/>
+                 </filter>
+                 <rect width="100%" height="100%" filter="url(#n)" opacity="0.35"/>
+               </svg>`
+            )}")`,
+          }}
+        />
 
-      {/* logo (centro) */}
-      <div className="relative z-10 mx-auto flex max-w-6xl justify-center px-6 pt-28">
+        {/* starfield */}
+        <canvas ref={starfield} className="absolute inset-0 h-full w-full" />
+
+        {/* vinheta suave */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(120% 80% at 50% 10%, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 60%, rgba(0,0,0,.05) 100%)",
+          }}
+        />
+      </div>
+
+      {/* topo com logo em glass */}
+      <div className="relative z-10 mx-auto flex max-w-6xl justify-center px-4 sm:px-6 pt-16 sm:pt-24">
         <div ref={logoWrap} className="relative">
-          <div className="grid place-items-center rounded-2xl border border-white/10 bg-white/[.04] p-4 shadow-[0_10px_24px_-12px_rgba(0,0,0,.55)] backdrop-blur">
+          <div className="grid place-items-center rounded-2xl border border-white/40 bg-white/70 px-3 py-2 sm:p-4 shadow-xl backdrop-blur-xl">
             <img
               src="https://qzvikwxwvwmngbnyxpwr.supabase.co/storage/v1/object/sign/static/logo_cores.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lODBjMDg3My1kM2U4LTQ5OWMtODczNy0xYWRlMDUwMGUxNGMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJzdGF0aWMvbG9nb19jb3Jlcy5wbmciLCJpYXQiOjE3NTU5NjQ3MDMsImV4cCI6MTc4NzUwMDcwM30.YOmDsN6voRH6V6ma42tpsENTCE5b0Bl_rj1DL0V91pc"
               alt="Árvore do Conhecimento"
-              className="h-16 w-auto object-contain"
+              className="h-16 sm:h-20 w-auto object-contain" // ↑ maior no mobile
               draggable={false}
             />
           </div>
           <div
             ref={flare}
-            className="pointer-events-none absolute -inset-y-6 -left-28 right-[-6rem] z-10 skew-x-12 bg-gradient-to-r from-transparent via-white/35 to-transparent"
-            style={{ filter: "blur(8px)" }}
+            className="pointer-events-none absolute -inset-y-6 -left-28 right-[-6rem] z-10 skew-x-12 bg-gradient-to-r from-transparent via-white/70 to-transparent"
+            style={{ filter: "blur(10px)" }}
             aria-hidden
           />
         </div>
       </div>
 
       {/* PALCO CENTRAL — tudo aparece no MESMO sítio */}
-      <div className="relative z-10 mx-auto max-w-5xl px-6">
-        {/* reserva de altura para estabilizar layout */}
-        <div className="relative mx-auto h-[220px] sm:h-[260px]">
+      <div className="relative z-10 mx-auto max-w-5xl px-4 sm:px-6">
+        {/* reserva + centragem vertical em mobile */}
+        <div className="relative mx-auto h-[300px] sm:h-[320px] grid sm:block place-items-center">
           {/* 1) Bem-vindo */}
           <div ref={l1} className="scene-block absolute inset-0 grid place-items-center">
-            <div ref={t1} className="galaxy text-center text-3xl sm:text-4xl text-white/95">
+            <div
+              ref={t1}
+              className="galaxy no-hyphen text-center text-2xl sm:text-4xl text-zinc-900 drop-shadow-[0_1px_0_rgba(255,255,255,.6)]"
+            >
               Bem-vindo, {fullName}.
             </div>
           </div>
 
           {/* 2) Estamos a reinventar… */}
           <div ref={l2} className="scene-block absolute inset-0 grid place-items-center">
-            <div ref={t2} className="galaxy text-center text-3xl sm:text-4xl text-white/95">
+            <div
+              ref={t2}
+              className="galaxy no-hyphen text-center text-2xl sm:text-4xl text-zinc-900 drop-shadow-[0_1px_0_rgba(255,255,255,.6)]"
+            >
               Estamos a reinventar a educação em Portugal.
             </div>
           </div>
 
           {/* 3) Começa aqui uma jornada… */}
           <div ref={l3} className="scene-block absolute inset-0 grid place-items-center">
-            <div ref={t3} className="galaxy text-center max-w-4xl text-3xl sm:text-4xl text-white/90">
+            <div
+              ref={t3}
+              className="galaxy no-hyphen text-center max-w-3xl sm:max-w-4xl text-2xl sm:text-4xl text-zinc-900/95 drop-shadow-[0_1px_0_rgba(255,255,255,.6)]"
+            >
               Começa aqui uma jornada clara. Objetivos definidos, feedback direto e progresso visível — sempre contigo ao leme.
             </div>
           </div>
 
-          {/* 4) PRONTO? — botão único centrado */}
+          {/* 4) PRONTO? — botão único centrado (glass) */}
           <div ref={ready} className="scene-block absolute inset-0 grid place-items-center">
             <button
               onClick={() => navigate(nextHref)}
-              className="galaxy rounded-2xl border border-white/10 bg-white/[.06] px-8 py-4 text-3xl sm:text-4xl text-white/95 backdrop-blur transition
-                         hover:bg-white/[.10] active:scale-[.98] focus:outline-none focus:ring-2 focus:ring-white/20"
+              className="galaxy btn-pulse rounded-2xl border border-white/50 bg-white/70 px-6 py-3 sm:px-8 sm:py-4 text-2xl sm:text-4xl text-zinc-900 backdrop-blur-xl transition
+                         hover:bg-white/80 active:scale-[.98] focus:outline-none focus:ring-2 focus:ring-primary/40 shadow-xl"
             >
               Pronto?
             </button>
@@ -280,10 +345,22 @@ tl.to(ready.current, { autoAlpha: 1, scale: 1, duration: 0.8, ease: "power3.out"
 
       {/* estilos locais */}
       <style>{`
-        .galaxy {
-          font-family: 'Rajdhani', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial;
-          letter-spacing: 0.02em;
+        @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;600;700&display=swap');
+
+        .galaxy { font-family: 'Raleway', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; letter-spacing: .02em; }
+        .no-hyphen { hyphens: manual; word-break: normal; overflow-wrap: break-word; }
+
+        /* Pulse do botão “Pronto?” */
+        @keyframes pulseReady {
+          0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(99,102,241,.45); }
+          70%  { transform: scale(1.04); box-shadow: 0 0 0 16px rgba(99,102,241,0); }
+          100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(99,102,241,0); }
         }
+        .btn-pulse { animation: pulseReady 1.8s ease-in-out infinite; will-change: transform, box-shadow; }
+
+        /* Segurança: se GSAP não correr, só a primeira cena aparece */
+        .scene-block { position: absolute; inset: 0; }
+        .scene-block:not(:first-child) { opacity: 0; pointer-events: none; }
       `}</style>
     </div>
   );

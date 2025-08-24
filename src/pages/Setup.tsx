@@ -1,10 +1,9 @@
-// file: src/pages/Setup.tsx
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   Lock,
   User,
@@ -17,7 +16,8 @@ import {
   XCircle,
   Phone,
   ShieldCheck,
-  Pencil
+  Pencil,
+  AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -88,7 +88,6 @@ const isValidNIFLocal = (nif: string) => {
   return digits[8] === check;
 };
 
-// ------------------- Componente -------------------
 export default function Setup() {
   const navigate = useNavigate();
 
@@ -544,51 +543,48 @@ export default function Setup() {
       return;
     }
 
-  // STEP 4 → Regulamento: só concluir se hasCompletedPdf
-  if (step === 4) {
-    if (!hasCompletedPdf) {
-      setError("Lê o regulamento até ao fim para poderes concluir.");
-      return;
+    // STEP 4 → Regulamento: só concluir se hasCompletedPdf
+    if (step === 4) {
+      if (!hasCompletedPdf) {
+        setError("Lê o regulamento até ao fim para poderes concluir.");
+        return;
+      }
+      setLoading(true);
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userId = sessionData?.session?.user?.id;
+        if (!userId) throw new Error("Sessão inválida.");
+
+        // marca setup_complete
+        const { error: upErr } = await supabase
+          .from("profiles")
+          .update({ setup_complete: true })
+          .eq("auth_user_id", userId);
+        if (upErr) throw upErr;
+
+        // 👉 nome do Supabase Auth (user_metadata)
+        const { data: userResp, error: userErr } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+
+        const md: any = userResp.user?.user_metadata || {};
+        const rawName =
+          md.full_name ||
+          md.name ||
+          [md.given_name, md.family_name].filter(Boolean).join(" ") ||
+          (userResp.user?.email ? userResp.user.email.split("@")[0] : "") ||
+          "Encarregado de Educação";
+
+        const encoded = encodeURIComponent(rawName).replace(/%20/g, "+");
+
+        navigate(`/introduction?name=${encoded}`);
+      } catch (e: any) {
+        console.error(e);
+        setError(e?.message ?? "Não foi possível concluir a configuração.");
+      } finally {
+        setLoading(false);
+      }
     }
-    setLoading(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData?.session?.user?.id;
-      if (!userId) throw new Error("Sessão inválida.");
-
-      // marca setup_complete
-      const { error: upErr } = await supabase
-        .from("profiles")
-        .update({ setup_complete: true })
-        .eq("auth_user_id", userId);
-      if (upErr) throw upErr;
-
-      // 👉 nome do Supabase Auth (user_metadata)
-      const { data: userResp, error: userErr } = await supabase.auth.getUser();
-      if (userErr) throw userErr;
-
-      const md: any = userResp.user?.user_metadata || {};
-      const rawName =
-        md.full_name ||
-        md.name ||
-        [md.given_name, md.family_name].filter(Boolean).join(" ") ||
-        (userResp.user?.email ? userResp.user.email.split("@")[0] : "") ||
-        "Encarregado de Educação";
-
-      // espaços como '+' e restantes percent-encoded
-      const encoded = encodeURIComponent(rawName).replace(/%20/g, "+");
-
-      navigate(`/introduction?name=${encoded}`);
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message ?? "Não foi possível concluir a configuração.");
-    } finally {
-      setLoading(false);
-    }
-  }
-}; // 👈 fecha o handleNext
-
-
+  };
 
   // Stripe helpers (opcional)
   const handleStripeSetup = async () => {
@@ -666,53 +662,65 @@ export default function Setup() {
     "https://qzvikwxwvwmngbnyxpwr.supabase.co/storage/v1/object/sign/static/Regulamento_AC_2024-2025.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lODBjMDg3My1kM2U4LTQ5OWMtODczNy0xYWRlMDUwMGUxNGMiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJzdGF0aWMvUmVndWxhbWVudG9fQUNfMjAyNC0yMDI1LnBkZiIsImlhdCI6MTc1NTkwNjE5NSwiZXhwIjoxNzg3NDQyMTk1fQ.k49Cp2NCcU74NGy7ilTEmrTp0sMb3wHR-26PJMPURV0";
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center relative p-3 sm:p-4 overflow-hidden">
-      {/* Fundo animado */}
+<div className="min-h-screen flex flex-col items-center justify-center relative p-4 overflow-hidden bg-gradient-to-br from-violet-600/20 via-fuchsia-500/10 to-emerald-500/10">
+      {/* Fundo animado — igual linguagem visual */}
       <motion.div
         className="absolute inset-0 -z-10"
         initial={{ opacity: 0 }}
-        animate={{ opacity: 0.9 }}
+        animate={{ opacity: 1 }}
         transition={{ duration: 0.6 }}
         style={{
           background:
-            "radial-gradient(1000px 600px at 20% -10%, rgba(99,102,241,.35), transparent 60%), radial-gradient(1000px 600px at 80% 110%, rgba(165,180,252,.35), transparent 60%), linear-gradient(120deg, #0b1020 0%, #0c1230 100%)",
-          filter: "saturate(1.15) blur(0px)",
+            "radial-gradient(1000px 600px at 20% -10%, rgba(99,102,241,.20), transparent 60%), radial-gradient(1000px 600px at 80% 110%, rgba(16,185,129,.18), transparent 60%), linear-gradient(120deg, #0b1020 0%, #0c1230 100%)",
+          filter: "saturate(1.1)",
         }}
       />
 
-      {/* Barra de progresso */}
+{/* ALERTA FIXO NO TOPO */}
+<div className="fixed top-0 inset-x-0 z-50 bg-amber-100/90 backdrop-blur border-b border-amber-200 text-amber-800">
+  <div className="max-w-4xl mx-auto px-3 sm:px-4 py-2 text-center text-sm font-medium">
+    <div className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3">
+      <span className="inline-flex items-center gap-1.5">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        Versão em testes
+      </span>
+      <span className="sm:inline">Suporte técnico 24/7 — <strong>928&nbsp;312&nbsp;655</strong></span>
+    </div>
+  </div>
+</div>
+
+      {/* Cabeçalho compacto */}
       <div className="w-full max-w-full md:max-w-3xl mb-4 sm:mb-6">
-        <div className="flex items-center justify-between gap-1.5 sm:gap-2 mb-2">
-          {steps.map((label, i) => (
-            <div key={label} className={`flex-1 flex flex-col items-center ${step === i ? "text-primary" : "text-muted-foreground"}`}>
-              <motion.div
-                layout
-                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-base font-bold border-2 ${step >= i ? "border-primary bg-primary/10" : "border-border bg-muted/30"}`}
-              >
-                {i + 1}
-              </motion.div>
-              <span className="text-[10px] sm:text-xs mt-1">{label}</span>
-            </div>
-          ))}
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs text-muted-foreground inline-flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            onboarding seguro
+          </div>
+          <span className="text-xs text-muted-foreground">Passo {step + 1} de 5</span>
         </div>
-        <div className="h-1.5 sm:h-2 w-full rounded-full bg-muted/30 overflow-hidden">
+        {/* Barra de progresso */}
+        <div className="h-1.5 sm:h-2 w-full rounded-full bg-white/10 overflow-hidden backdrop-blur">
           <motion.div
             className="h-full bg-primary"
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
-            transition={{ type: "spring", stiffness: 120, damping: 16 }}
+            transition={{ type: "spring", stiffness: 120, damping: 18 }}
           />
         </div>
       </div>
 
-      {/* Card principal */}
+      {/* Card principal — glassmorphism igual */}
       <motion.div layout className="w-full max-w-full md:max-w-3xl">
-        <Card className="w-full shadow-2xl border border-border rounded-2xl">
-          <CardHeader className="px-4 sm:px-6 py-4">
-            <CardTitle className="text-xl sm:text-2xl font-bold text-primary">Configuração Inicial</CardTitle>
+        <Card className="w-full rounded-2xl border-white/20 bg-white/70 dark:bg-zinc-900/60 backdrop-blur-xl shadow-2xl">
+          <CardHeader className="px-4 sm:px-6 py-5">
+            <CardTitle className="text-xl sm:text-2xl">Configuração Inicial</CardTitle>
+            <CardDescription>Vamos preparar a tua conta em poucos passos.</CardDescription>
           </CardHeader>
           <CardContent className="px-4 sm:px-6 pb-6">
             <AnimatePresence mode="wait">
+              {/* STEP 0 */}
               {step === 0 && (
                 <motion.form
                   key="step0"
@@ -721,12 +729,18 @@ export default function Setup() {
                   animate="visible"
                   exit="exit"
                   className="flex flex-col gap-6 sm:gap-8"
-                  onSubmit={(e) => { e.preventDefault(); handleNext(); }}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleNext();
+                  }}
                 >
                   {/* Password */}
-                  <motion.div layout className="flex flex-col gap-2 p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
-                    <div className="flex items-center gap-2 font-semibold text-base sm:text-lg mb-2 text-primary">
-                      <Lock className="w-5 h-5" /> Definir Password
+                  <motion.div
+                    layout
+                    className="flex flex-col gap-2 p-3 sm:p-4 bg-white/60 dark:bg-white/5 rounded-xl border border-white/20"
+                  >
+                    <div className="flex items-center gap-2 font-semibold text-base sm:text-lg mb-2">
+                      <Lock className="w-5 h-5 text-primary" /> Definir Password
                     </div>
                     <div className="text-xs text-muted-foreground -mt-1 sm:-mt-2 mb-1">
                       (Opcional) Se deixares em branco, mantemos a password atual.
@@ -757,7 +771,7 @@ export default function Setup() {
                     </div>
                     {password.length > 0 && (
                       <div className="flex items-center gap-2 mt-1 sm:mt-2">
-                        <div className="w-28 sm:w-32 h-2 bg-muted/30 rounded-full">
+                        <div className="w-28 sm:w-32 h-2 bg-white/30 rounded-full">
                           <motion.div
                             className={`h-2 rounded-full ${
                               passwordStrength === 0
@@ -774,16 +788,21 @@ export default function Setup() {
                             animate={{ width: `${(passwordStrength / 4) * 100}%` }}
                           />
                         </div>
-                        <span className="text-xs">{["Fraca", "Média", "Boa", "Forte", "Excelente"][passwordStrength]}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {["Fraca", "Média", "Boa", "Forte", "Excelente"][passwordStrength]}
+                        </span>
                       </div>
                     )}
                   </motion.div>
 
                   {/* Telefone + verificação */}
-                  <motion.div layout className="flex flex-col gap-3 p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
+                  <motion.div
+                    layout
+                    className="flex flex-col gap-3 p-3 sm:p-4 bg-white/60 dark:bg-white/5 rounded-xl border border-white/20"
+                  >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 font-semibold text-base sm:text-lg text-primary">
-                        <Phone className="w-5 h-5" /> Verificação de Telemóvel
+                      <div className="flex items-center gap-2 font-semibold text-base sm:text-lg">
+                        <Phone className="w-5 h-5 text-primary" /> Verificação de Telemóvel
                       </div>
 
                       {/* 🔀 Switch Pretendo Recibo (controla salto do passo 1) */}
@@ -795,7 +814,7 @@ export default function Setup() {
                           checked={wantsReceipt}
                           onChange={(e) => setWantsReceipt(e.target.checked)}
                         />
-                        <span className={`h-6 w-11 rounded-full p-1 transition ${wantsReceipt ? "bg-primary" : "bg-muted"}`}>
+                        <span className={`h-6 w-11 rounded-full p-1 transition ${wantsReceipt ? "bg-primary" : "bg-white/30"}`}>
                           <span className={`block h-4 w-4 bg-white rounded-full transition ${wantsReceipt ? "translate-x-5" : "translate-x-0"}`} />
                         </span>
                       </label>
@@ -807,7 +826,10 @@ export default function Setup() {
                         <Input
                           type="tel"
                           value={phone}
-                          onChange={(e) => { setPhone(e.target.value); setPhoneVerified(false); }}
+                          onChange={(e) => {
+                            setPhone(e.target.value);
+                            setPhoneVerified(false);
+                          }}
                           placeholder="Telemóvel (ex.: 9XXXXXXXX ou +3519XXXXXXXX)"
                           className="pl-8"
                           disabled={smsSending}
@@ -838,21 +860,15 @@ export default function Setup() {
                             disabled={!sentCode}
                           />
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={verifyCode}
-                          disabled={!sentCode || codeInput.length < 6}
-                        >
+                        <Button type="button" variant="outline" onClick={verifyCode} disabled={!sentCode || codeInput.length < 6}>
                           Confirmar código
                         </Button>
                       </div>
                     )}
 
                     {phoneVerified && (
-                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 text-green-600 text-sm">
-                        <ShieldCheck className="w-4 h-4" />
-                        Telemóvel verificado.
+                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 text-emerald-600 text-sm">
+                        <ShieldCheck className="w-4 h-4" /> Telemóvel verificado.
                       </motion.div>
                     )}
 
@@ -863,7 +879,11 @@ export default function Setup() {
                     </div>
                   </motion.div>
 
-                  {error && <div className="text-destructive text-sm mt-1 sm:mt-2">{error}</div>}
+                  {error && (
+                    <div className="flex items-start gap-2 text-sm text-red-600">
+                      <AlertTriangle className="h-4 w-4 mt-0.5" /> {error}
+                    </div>
+                  )}
                   <div className="flex flex-col sm:flex-row sm:justify-end gap-2 mt-3">
                     <Button type="submit" disabled={loading} className="w-full sm:w-auto">
                       Guardar e continuar <ArrowRight className="w-4 h-4 ml-2" />
@@ -872,6 +892,7 @@ export default function Setup() {
                 </motion.form>
               )}
 
+              {/* STEP 1 */}
               {step === 1 && (
                 <motion.form
                   key="step1"
@@ -880,12 +901,15 @@ export default function Setup() {
                   animate="visible"
                   exit="exit"
                   className="flex flex-col gap-6 sm:gap-8"
-                  onSubmit={(e) => { e.preventDefault(); handleNext(); }}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleNext();
+                  }}
                 >
                   {/* Cabeçalho faturação */}
-                  <div className="flex items-start sm:items-center justify-between gap-2 p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-start sm:items-center justify-between gap-2 p-3 rounded-lg border border-white/20 bg-white/50 dark:bg-white/5">
                     <div className="text-sm">
-                      <div className="font-semibold text-primary">Dados de Faturação</div>
+                      <div className="font-semibold">Dados de Faturação</div>
                       <div className="text-muted-foreground">Preenche para emitir recibo.</div>
                     </div>
                     <Button
@@ -893,7 +917,6 @@ export default function Setup() {
                       variant="ghost"
                       className="text-xs sm:text-sm"
                       onClick={() => {
-                        // permitir voltar e desligar recibo rapidamente
                         setWantsReceipt(false);
                         setStep(2);
                       }}
@@ -904,7 +927,7 @@ export default function Setup() {
 
                   <div className="flex flex-col md:flex-row gap-4">
                     {/* Dados de Faturação */}
-                    <motion.div layout className="flex-1 flex flex-col gap-3 p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
+                    <motion.div layout className="flex-1 flex flex-col gap-3 p-3 sm:p-4 bg-white/60 dark:bg-white/5 rounded-xl border border-white/20">
                       <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
                         {/* Nome (3) | NIF (3) */}
                         <div className="md:col-span-3 relative">
@@ -930,7 +953,7 @@ export default function Setup() {
                           />
                           <div className="absolute right-2 top-2.5">
                             {nifValid === true ? (
-                              <CheckCircle className="h-4 w-4 text-green-600" />
+                              <CheckCircle className="h-4 w-4 text-emerald-600" />
                             ) : nifValid === false ? (
                               <XCircle className="h-4 w-4 text-red-600" />
                             ) : null}
@@ -1026,8 +1049,8 @@ export default function Setup() {
                     </motion.div>
 
                     {/* Preview pequena */}
-                    <motion.div layout className="w-full md:w-64 shrink-0 h-fit flex flex-col gap-2 p-4 bg-background border border-border rounded-xl shadow">
-                      <div className="font-semibold text-primary text-sm mb-1">Preview Fatura</div>
+                    <motion.div layout className="w-full md:w-64 shrink-0 h-fit flex flex-col gap-2 p-4 bg-white/60 dark:bg-white/5 border border-white/20 rounded-xl shadow">
+                      <div className="font-semibold text-sm mb-1">Preview Fatura</div>
                       <>
                         <div className="text-xs text-muted-foreground">{billingInfo.full_name || "—"}</div>
                         <div className="text-xs">NIF: {billingInfo.tax_number || "—"}</div>
@@ -1042,7 +1065,11 @@ export default function Setup() {
                     </motion.div>
                   </div>
 
-                  {error && <div className="text-destructive text-sm mt-1 sm:mt-2">{error}</div>}
+                  {error && (
+                    <div className="flex items-start gap-2 text-sm text-red-600">
+                      <AlertTriangle className="h-4 w-4 mt-0.5" /> {error}
+                    </div>
+                  )}
                   <div className="flex flex-col sm:flex-row justify-between gap-2 mt-2">
                     <Button type="button" variant="outline" onClick={handlePrev} className="w-full sm:w-auto">
                       <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
@@ -1054,55 +1081,41 @@ export default function Setup() {
                 </motion.form>
               )}
 
+              {/* STEP 2 */}
               {step === 2 && (
-                <motion.div
-                  key="step2"
-                  variants={stepVariants}
-                  initial="hidden"
-                  animate="visible"
-                  exit="exit"
-                  className="flex flex-col gap-6"
-                >
-                  <div className="p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
+                <motion.div key="step2" variants={stepVariants} initial="hidden" animate="visible" exit="exit" className="flex flex-col gap-6">
+                  <div className="p-3 sm:p-4 bg-white/60 dark:bg-white/5 rounded-xl border border-white/20">
                     <div className="flex items-center justify-between">
                       <div className="space-y-1">
-                        <div className="text-sm font-semibold text-primary">Débito Direto</div>
+                        <div className="text-sm font-semibold">Débito Direto</div>
                         <p className="text-sm text-muted-foreground">
-                          Podes ligar o débito direto para simplificar pagamentos.{" "}
+                          Podes ligar o débito direto para simplificar pagamentos. {" "}
                           <span className="font-medium">Não vamos cobrar nada sem a tua autorização.</span>
                         </p>
                       </div>
                       {stripeSetup === "done" && (
-                        <span className="text-xs px-2 py-1 rounded bg-green-100 text-green-700">Configurado</span>
+                        <span className="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700">Configurado</span>
                       )}
                     </div>
 
                     <div className="mt-4 flex flex-col sm:flex-row gap-2">
-                      <Button
-                        type="button"
-                        variant={stripeSetup === "done" ? "outline" : "default"}
-                        onClick={handleStripeSetup}
-                        disabled={stripeSetup === "pending"}
-                      >
+                      <Button type="button" variant={stripeSetup === "done" ? "outline" : "default"} onClick={handleStripeSetup} disabled={stripeSetup === "pending"}>
                         {stripeSetup === "pending" ? "A abrir..." : stripeSetup === "done" ? "Rever" : "Configurar agora"}
                       </Button>
 
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() => setStripeSetup((s) => (s === "done" ? s : "not_started"))}
-                        className="text-muted-foreground"
-                      >
+                      <Button type="button" variant="ghost" onClick={() => setStripeSetup((s) => (s === "done" ? s : "not_started"))} className="text-muted-foreground">
                         Preferes tratar mais tarde?
                       </Button>
                     </div>
 
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Passo opcional. Podes avançar sem configurar agora.
-                    </p>
+                    <p className="mt-2 text-xs text-muted-foreground">Passo opcional. Podes avançar sem configurar agora.</p>
                   </div>
 
-                  {error && <div className="text-destructive text-sm">{error}</div>}
+                  {error && (
+                    <div className="flex items-start gap-2 text-sm text-red-600">
+                      <AlertTriangle className="h-4 w-4 mt-0.5" /> {error}
+                    </div>
+                  )}
                   <div className="flex flex-col sm:flex-row justify-between gap-2">
                     <Button type="button" variant="outline" onClick={handlePrev} className="w-full sm:w-auto">
                       <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
@@ -1114,27 +1127,19 @@ export default function Setup() {
                 </motion.div>
               )}
 
+              {/* STEP 3 */}
               {step === 3 && (
-                <motion.div
-                  key="step3"
-                  variants={stepVariants}
-                  initial="hidden"
-                  animate="visible"
-                  exit="exit"
-                  className="flex flex-col gap-6 sm:gap-8"
-                >
-                  <div className="flex flex-col gap-2 p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
-                    <div className="flex items-center gap-2 font-semibold text-base sm:text-lg mb-2 text-primary">
-                      <Users className="w-5 h-5" /> Alunos do Plano
+                <motion.div key="step3" variants={stepVariants} initial="hidden" animate="visible" exit="exit" className="flex flex-col gap-6 sm:gap-8">
+                  <div className="flex flex-col gap-2 p-3 sm:p-4 bg-white/60 dark:bg-white/5 rounded-xl border border-white/20">
+                    <div className="flex items-center gap-2 font-semibold text-base sm:text-lg mb-2">
+                      <Users className="w-5 h-5 text-primary" /> Alunos do Plano
                     </div>
                     <div className="mb-2 text-xs sm:text-sm text-muted-foreground">Limite do plano: {planLimit} alunos</div>
 
                     {students.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-6 sm:py-8">
                         <div className="text-muted-foreground mb-2 text-sm">Ainda não adicionaste nenhum aluno.</div>
-                        <Button variant="secondary" onClick={openAddStudent}>
-                          Adicionar primeiro aluno
-                        </Button>
+                        <Button variant="secondary" onClick={openAddStudent}>Adicionar primeiro aluno</Button>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 gap-2">
@@ -1144,7 +1149,7 @@ export default function Setup() {
                             layout
                             initial={{ opacity: 0, y: 6 }}
                             animate={{ opacity: 1, y: 0 }}
-                            className="flex items-center gap-3 sm:gap-4 p-3 bg-background/80 hover:bg-background border border-border rounded-xl transition-shadow shadow-sm hover:shadow-md"
+                            className="flex items-center gap-3 sm:gap-4 p-3 bg-background/80 hover:bg-background border border-white/20 rounded-xl transition-shadow shadow-sm hover:shadow-md"
                           >
                             <div className="flex-1">
                               <div className="font-medium flex items-center gap-2">
@@ -1152,7 +1157,7 @@ export default function Setup() {
                                 <button
                                   type="button"
                                   onClick={() => openEditStudent(idx)}
-                                  className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-muted/60 hover:bg-muted transition"
+                                  className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-white/50 dark:bg-white/10 hover:bg-white/70 transition"
                                   aria-label="Editar aluno"
                                 >
                                   <Pencil className="w-3 h-3" /> Editar
@@ -1175,7 +1180,11 @@ export default function Setup() {
                     )}
                   </div>
 
-                  {error && <div className="text-destructive text-sm mt-1 sm:mt-2">{error}</div>}
+                  {error && (
+                    <div className="flex items-start gap-2 text-sm text-red-600 mt-1 sm:mt-2">
+                      <AlertTriangle className="h-4 w-4 mt-0.5" /> {error}
+                    </div>
+                  )}
 
                   <div className="flex flex-col sm:flex-row justify-between gap-2 mt-2">
                     <Button type="button" variant="outline" onClick={handlePrev} className="w-full sm:w-auto">
@@ -1189,36 +1198,18 @@ export default function Setup() {
                   {/* modal aluno (Adicionar/Editar) */}
                   <AnimatePresence>
                     {showStudentModal && (
-                      <motion.div
-                        className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3 sm:p-4"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                      >
+                      <motion.div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3 sm:p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                         <motion.div
-                          className="bg-background rounded-xl p-5 sm:p-6 shadow-xl w-full max-w-md border border-border"
+                          className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl rounded-xl p-5 sm:p-6 shadow-xl w-full max-w-md border border-white/20"
                           initial={{ scale: 0.95, opacity: 0 }}
                           animate={{ scale: 1, opacity: 1 }}
                           exit={{ scale: 0.95, opacity: 0 }}
                           transition={{ type: "spring", stiffness: 220, damping: 20 }}
                         >
-                          <div className="font-semibold text-lg mb-4">
-                            {editingIndex === null ? "Adicionar Aluno" : "Editar Aluno"}
-                          </div>
+                          <div className="font-semibold text-lg mb-4">{editingIndex === null ? "Adicionar Aluno" : "Editar Aluno"}</div>
                           <div className="flex flex-col gap-3 sm:gap-4">
-                            <Input
-                              type="text"
-                              value={studentForm.name}
-                              onChange={(e) => setStudentForm({ ...studentForm, name: e.target.value })}
-                              placeholder="Nome do aluno"
-                              required
-                            />
-                            <select
-                              value={studentForm.year}
-                              onChange={(e) => setStudentForm({ ...studentForm, year: e.target.value })}
-                              required
-                              className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                            >
+                            <Input type="text" value={studentForm.name} onChange={(e) => setStudentForm({ ...studentForm, name: e.target.value })} placeholder="Nome do aluno" required />
+                            <select value={studentForm.year} onChange={(e) => setStudentForm({ ...studentForm, year: e.target.value })} required className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm">
                               <option value="">Seleciona o ano</option>
                               {Array.from({ length: 12 }, (_, i) => (
                                 <option key={i + 1} value={`${i + 1}º ano`}>
@@ -1232,9 +1223,7 @@ export default function Setup() {
                             <Button variant="outline" onClick={() => setShowStudentModal(false)}>
                               Cancelar
                             </Button>
-                            <Button onClick={handleSaveStudent}>
-                              Guardar
-                            </Button>
+                            <Button onClick={handleSaveStudent}>Guardar</Button>
                           </div>
                         </motion.div>
                       </motion.div>
@@ -1243,21 +1232,13 @@ export default function Setup() {
                 </motion.div>
               )}
 
+              {/* STEP 4 */}
               {step === 4 && (
-                <motion.div
-                  key="step4"
-                  variants={stepVariants}
-                  initial="hidden"
-                  animate="visible"
-                  exit="exit"
-                  className="flex flex-col gap-6"
-                >
-                  <div className="p-3 sm:p-4 bg-muted/40 rounded-xl border border-border">
+                <motion.div key="step4" variants={stepVariants} initial="hidden" animate="visible" exit="exit" className="flex flex-col gap-6">
+                  <div className="p-3 sm:p-4 bg-white/60 dark:bg-white/5 rounded-xl border border-white/20">
                     <div className="space-y-1">
-                      <div className="text-sm font-semibold text-primary">Regulamento Interno</div>
-                      <p className="text-sm text-muted-foreground">
-                        Lê o documento até ao fim. O botão de concluir desbloqueia quando tiveres visitado todas as páginas.
-                      </p>
+                      <div className="text-sm font-semibold">Regulamento Interno</div>
+                      <p className="text-sm text-muted-foreground">Lê o documento até ao fim. O botão de concluir desbloqueia quando tiveres visitado todas as páginas.</p>
                     </div>
 
                     <div className="mt-4 h-[60vh] md:h-[70vh] w-full border rounded-lg overflow-hidden bg-background">
@@ -1281,12 +1262,14 @@ export default function Setup() {
                         />
                       </Worker>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-2">
-                      Páginas lidas: {pdfVisitedPages.size}/{pdfTotalPages || "—"}
-                    </div>
+                    <div className="text-xs text-muted-foreground mt-2">Páginas lidas: {pdfVisitedPages.size}/{pdfTotalPages || "—"}</div>
                   </div>
 
-                  {error && <div className="text-destructive text-sm">{error}</div>}
+                  {error && (
+                    <div className="flex items-start gap-2 text-sm text-red-600">
+                      <AlertTriangle className="h-4 w-4 mt-0.5" /> {error}
+                    </div>
+                  )}
                   <div className="flex flex-col sm:flex-row justify-between gap-2">
                     <Button type="button" variant="outline" onClick={handlePrev} className="w-full sm:w-auto">
                       <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
@@ -1301,11 +1284,6 @@ export default function Setup() {
           </CardContent>
         </Card>
       </motion.div>
-
-      <style>{`
-        .animate-fade-in { animation: fadeIn .5s cubic-bezier(.4,0,.2,1); }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px);} to { opacity: 1; transform: translateY(0);} }
-      `}</style>
 
       {(loading || bootLoading) && (
         <div className="fixed inset-0 z-50 grid place-items-center backdrop-blur-sm">

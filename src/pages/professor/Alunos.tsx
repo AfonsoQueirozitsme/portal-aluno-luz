@@ -60,6 +60,11 @@ export default function ProfessorAlunos() {
   const [gName, setGName] = useState("");
   const [gEmail, setGEmail] = useState("");
 
+  // ── NOVO: Modal de resultado (sucesso/erro) ────────────────────────────────
+  const [resultOpen, setResultOpen] = useState(false);
+  const [resultOk, setResultOk] = useState<boolean | null>(null);
+  const [resultMsg, setResultMsg] = useState<string>("");
+
   // Base das rotas pedidas
   const MSG_BASE = "/professor/mensagens";
 
@@ -248,11 +253,18 @@ export default function ProfessorAlunos() {
     }
   };
 
-  // Submit do novo encarregado → chama Edge Function
+  // Submit do novo encarregado → chama Edge Function (sem alert JS)
   async function handleCreateGuardian(e: React.FormEvent) {
     e.preventDefault();
     const email = gEmail.trim().toLowerCase();
-    if (!email) return alert("Indica o email do encarregado.");
+
+    if (!email) {
+      setResultOk(false);
+      setResultMsg("Indica o email do encarregado.");
+      setResultOpen(true);
+      return;
+    }
+
     try {
       setSubmittingGuardian(true);
 
@@ -265,17 +277,25 @@ export default function ProfessorAlunos() {
 
       if (error) {
         console.error("invite-guardian error:", error);
-        alert(error.message || "Falhou criar o encarregado.");
+        setResultOk(false);
+        setResultMsg(error.message || "Falhou criar o encarregado.");
+        setResultOpen(true);
         return;
       }
 
+      // Sucesso
       setOpenGuardian(false);
       setGName("");
       setGEmail("");
-      alert("Convite enviado. O encarregado deve verificar o email.");
+
+      setResultOk(true);
+      setResultMsg("Convite enviado. Pede ao encarregado para verificar o email.");
+      setResultOpen(true);
     } catch (e: any) {
       console.error(e);
-      alert("Ocorreu um erro a criar o encarregado.");
+      setResultOk(false);
+      setResultMsg("Ocorreu um erro a criar o encarregado.");
+      setResultOpen(true);
     } finally {
       setSubmittingGuardian(false);
     }
@@ -581,6 +601,32 @@ export default function ProfessorAlunos() {
           </CardContent>
         </Card>
       </div>
+
+      {/* NOVO: Modal de resultado (sucesso/erro) */}
+      <Dialog open={resultOpen} onOpenChange={setResultOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{resultOk ? "Tudo certo" : "Ocorreu um problema"}</DialogTitle>
+            <DialogDescription>{resultMsg}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+  <Button type="button" variant="ghost" onClick={() => setResultOpen(false)}>
+    Fechar
+  </Button>
+  <Button
+    type="button"
+    onClick={() => {
+      setResultOpen(false);      // fecha modal de resultado
+      setGName("");              // limpa campos
+      setGEmail("");
+      setOpenGuardian(true);     // abre modal vazio de novo
+    }}
+  >
+    Novo aluno
+  </Button>
+</DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <style>
         {`

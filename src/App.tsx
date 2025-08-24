@@ -39,13 +39,14 @@ const ProfessorAvaliacoes = lazy(() => import("./pages/professor/Avaliacoes"));
 const ProfessorPerfil = lazy(() => import("./pages/professor/Perfil"));
 const ProfessorAlunoRelatorio = lazy(() => import("./pages/professor/RelatorioAluno"));
 const ProfessorPos = lazy(() => import("./pages/professor/Pos"));
-
+const Users = lazy(() => import("./pages/professor/Users"));
 // Other pages
 const ContaBloqueada = lazy(() => import("./pages/ContaBloqueada"));
 const EmManutencao = lazy(() => import("./pages/EmManutencao"));
 const Recuperar = lazy(() => import("./pages/RecuperarPassword"));
 const Setup = lazy(() => import("./pages/Setup"));
 const Landing = lazy(() => import("./pages/Landing"));
+const RecuperarPassword = lazy(() => import("./pages/Recuperar"));
 
 const queryClient = new QueryClient();
 
@@ -163,6 +164,7 @@ export default function App() {
                 <Route path="/setup" element={<Setup />} />
                 <Route path="/auth" element={<Index />} />
                 <Route path="/introduction" element={<Intro />} />
+                <Route path="/recuperar" element={<RecuperarPassword />} />
 
                 
 
@@ -177,6 +179,7 @@ export default function App() {
                   <Route path="avaliacoes" element={<ProfessorAvaliacoes />} />
                   <Route path="perfil" element={<ProfessorPerfil />} />
                   <Route path="alunos/:id" element={<ProfessorAlunoRelatorio />} />
+                  <Route path="users" element={<Users />} />
                   <Route path="pos" element={<ProfessorPos />} />
                 </Route>
 

@@ -1,18 +1,52 @@
-// file: src/pages/RecoverPassword.tsx
 import { useEffect, useMemo, useState } from "react";
+import { Helmet } from "react-helmet-async";
 import { supabase } from "@/integrations/supabase/client";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Loader2, Mail, Lock, Eye, EyeOff, CheckCircle2, ArrowLeft } from "lucide-react";
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+
+import { Loader2, CheckCircle2, ShieldCheck, Eye, EyeOff, AlertTriangle, Mail, Lock, ArrowLeft } from "lucide-react";
 
 type Mode = "request" | "reset";
+
+/*
+  RecoverPassword — Visual IGUAL ao da primeira página (glassmorphism com Card, Badge, Alert, Progress, etc.)
+  - Modo REQUEST: envia email de recuperação (resetPasswordForEmail)
+  - Modo RESET: valida sessão via #access_token/&refresh_token&type=recovery ou ?code= e permite definir nova password
+*/
+
+function parseHashParams(): Record<string, string> {
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+  const params = new URLSearchParams(hash);
+  const result: Record<string, string> = {};
+  params.forEach((v, k) => (result[k] = v));
+  return result;
+}
+
+function scorePassword(pw: string) {
+  let score = 0;
+  if (!pw) return 0;
+  const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^\w\s]/];
+  score += Math.min(20, pw.length * 2);
+  score += classes.reduce((acc, rgx) => acc + (rgx.test(pw) ? 20 : 0), 0);
+  return Math.min(100, score);
+}
 
 export default function RecoverPassword() {
   const navigate = useNavigate();
 
   const [mode, setMode] = useState<Mode>("request");
+  const [loadingLink, setLoadingLink] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   // REQUEST
   const [email, setEmail] = useState("");
@@ -21,25 +55,62 @@ export default function RecoverPassword() {
   const [reqError, setReqError] = useState<string | null>(null);
 
   // RESET
-  const [newPwd, setNewPwd] = useState("");
-  const [confirmPwd, setConfirmPwd] = useState("");
-  const [showPwd, setShowPwd] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [updated, setUpdated] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
-  const [resetOk, setResetOk] = useState(false);
 
-  // Alterar para modo RESET quando a Supabase sinaliza recuperação
+  const strength = useMemo(() => scorePassword(password), [password]);
+  const match = password.length > 0 && password === confirm;
+  const canSubmit = sessionReady && match && strength >= 40 && password.length >= 8 && !updating;
+
+  // Detectar e preparar sessão a partir do link
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+    const sub = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") setMode("reset");
     });
-    // fallback: hash do URL
-    if (typeof window !== "undefined" && window.location.hash.includes("type=recovery")) {
-      setMode("reset");
-    }
+
+    (async () => {
+      setLoadingLink(true);
+      try {
+        setLinkError(null);
+        const p = parseHashParams();
+        const access_token = p["access_token"];
+        const refresh_token = p["refresh_token"]; 
+        const type = p["type"]; // "recovery"
+
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+          setSessionReady(true);
+          setMode("reset");
+        } else if (access_token && refresh_token && type === "recovery") {
+          const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+          if (error) throw error;
+          setSessionReady(true);
+          setMode("reset");
+        } else if (window.location.hash.includes("type=recovery")) {
+          // Sem tokens, dependemos do onAuthStateChange; mantemos UI de reset mas sem submit
+          setMode("reset");
+        }
+      } catch (e: any) {
+        setLinkError(e?.message || "Link de recuperação inválido ou expirado.");
+      } finally {
+        try {
+          window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+        } catch {}
+        setLoadingLink(false);
+      }
+    })();
+
     return () => {
-      sub.subscription.unsubscribe();
+      sub.data.subscription.unsubscribe();
     };
   }, []);
 
@@ -48,7 +119,7 @@ export default function RecoverPassword() {
     return `${window.location.origin}/recuperar`;
   }, []);
 
-  const sendEmail = async (e: React.FormEvent) => {
+  async function sendEmail(e: React.FormEvent) {
     e.preventDefault();
     setSending(true);
     setReqError(null);
@@ -56,23 +127,22 @@ export default function RecoverPassword() {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectUrl });
       if (error) throw error;
-      setSentMsg("Enviámos um email com um link para definires uma nova palavra-passe.");
+      setSentMsg("Enviámos um email com um link para definires uma nova palavra‑passe.");
     } catch (err: any) {
       setReqError(err?.message || "Não foi possível enviar o email de recuperação.");
     } finally {
       setSending(false);
     }
-  };
+  }
 
-  const pwdStrength = useMemo(() => getPwdStrength(newPwd), [newPwd]);
-
-  const validatePwd = () => {
-    if (newPwd.length < 8) return "A palavra-passe deve ter pelo menos 8 caracteres.";
-    if (newPwd !== confirmPwd) return "As palavras-passe não coincidem.";
+  function validatePwd(): string | null {
+    if (password.length < 8) return "A palavra‑passe deve ter pelo menos 8 caracteres.";
+    if (password !== confirm) return "As palavras‑passe não coincidem.";
+    if (!sessionReady) return "Sessão inválida. Abre o link de recuperação novamente.";
     return null;
-  };
+  }
 
-  const updatePassword = async (e: React.FormEvent) => {
+  async function handleUpdatePassword(e: React.FormEvent) {
     e.preventDefault();
     setResetError(null);
     const v = validatePwd();
@@ -82,343 +152,236 @@ export default function RecoverPassword() {
     }
     setUpdating(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPwd });
-      if (error) throw error;
-      setResetOk(true);
-      setTimeout(() => navigate("/aluno"), 1000);
-    } catch (err: any) {
-      setResetError(err?.message || "Não foi possível atualizar a palavra-passe.");
+      const { error: upErr } = await supabase.auth.updateUser({ password });
+      if (upErr) throw upErr;
+      setUpdated(true);
+      setTimeout(() => navigate("/aluno"), 1200);
+    } catch (e: any) {
+      setResetError(e?.message || "Não foi possível atualizar a password.");
     } finally {
       setUpdating(false);
     }
-  };
+  }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-black text-foreground">
-      {/* AURORA / BACKGROUND */}
-      <AuroraBackground />
+    <>
+      <Helmet>
+        <title>{mode === "request" ? "Recuperar palavra‑passe" : "Definir nova palavra‑passe"} · Árvore do Conhecimento</title>
+        <meta name="robots" content="noindex" />
+      </Helmet>
 
-      {/* GLOW por trás do cartão */}
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[56%] h-[520px] w-[520px] rounded-full blur-[90px] opacity-40"
-             style={{ background: "radial-gradient(closest-side, hsl(var(--primary) / .35), transparent 70%)" }} />
-      </div>
-
-      {/* Conteúdo */}
-      <div className="relative z-10 px-4 py-10 md:py-16 grid place-items-center">
-        <motion.div
-          initial={{ opacity: 0, y: 18, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full max-w-md"
-        >
-          {/* CARTÃO com border animada */}
-          <div className="relative rounded-2xl p-[1px] bg-gradient-to-br from-white/10 via-primary/30 to-white/10">
-            <div className="relative rounded-2xl bg-gradient-to-b from-background/90 to-background/70 backdrop-blur-xl border border-white/10">
-              {/* linha brilhante superior */}
-              <div className="absolute inset-x-8 -top-[1px] h-px bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-60" />
-              {/* conteúdo do cartão */}
-              <div className="p-6 md:p-7">
-                <div className="mb-5 flex items-center justify-between">
-                  <Link to="/" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition">
-                    <ArrowLeft className="h-4 w-4" />
-                    <span>Voltar</span>
-                  </Link>
-                  <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400/80 animate-pulse" />
-                    seguro
-                  </span>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-600/20 via-fuchsia-500/10 to-emerald-500/10 p-4">
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="w-full max-w-md">
+          <Card className="backdrop-blur-xl bg-white/70 dark:bg-zinc-900/60 border-white/40 dark:border-white/10 shadow-xl">
+            <CardHeader className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                  <Badge variant="secondary" className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">Segurança</Badge>
                 </div>
-
-                <div className="mb-5 text-center">
-                  <motion.h1
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.05 }}
-                    className="text-xl md:text-2xl font-semibold tracking-tight"
-                  >
-                    {mode === "request" ? "Recuperar palavra-passe" : "Definir nova palavra-passe"}
-                  </motion.h1>
-                  <motion.p
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.12 }}
-                    className="text-sm text-muted-foreground mt-1.5"
-                  >
-                    {mode === "request"
-                      ? "Escreve o teu email e enviaremos um link de recuperação."
-                      : "Escolhe uma nova palavra-passe forte para a tua conta."}
-                  </motion.p>
-                </div>
-
-                {/* FORM REQUEST */}
-                {mode === "request" && (
-                  <motion.form
-                    onSubmit={sendEmail}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="grid gap-4"
-                    aria-busy={sending}
-                  >
-                    <div>
-                      <label className="text-sm font-medium">Email</label>
-                      <div className="mt-1 relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                          <Mail className="h-4 w-4" />
-                        </span>
-                        <Input
-                          type="email"
-                          placeholder="o.teu@email.com"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          required
-                          autoFocus
-                          className="pl-10 h-11 rounded-xl bg-white/90 dark:bg-white/5 border-white/10 focus-visible:ring-2 focus-visible:ring-primary"
-                        />
-                      </div>
-                    </div>
-
-                    {reqError && (
-                      <Alert kind="error">{reqError}</Alert>
-                    )}
-                    {sentMsg && (
-                      <Alert kind="success">
-                        <div className="inline-flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4" />
-                          <span>{sentMsg}</span>
-                        </div>
-                      </Alert>
-                    )}
-
-                    <Button
-                      type="submit"
-                      disabled={sending}
-                      className="h-11 rounded-xl font-semibold tracking-tight"
-                    >
-                      {sending ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" /> A enviar…
-                        </span>
-                      ) : (
-                        "Enviar link"
-                      )}
-                    </Button>
-
-                    <div className="text-xs text-muted-foreground text-center mt-1.5">
-                      Lembraste da password?{" "}
-                      <Link to="/" className="text-primary hover:underline">
-                        Entrar
-                      </Link>
-                    </div>
-                  </motion.form>
-                )}
-
-                {/* FORM RESET */}
-                {mode === "reset" && (
-                  <motion.form
-                    onSubmit={updatePassword}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="grid gap-4"
-                    aria-busy={updating}
-                  >
-                    <div>
-                      <label className="text-sm font-medium">Nova palavra-passe</label>
-                      <div className="mt-1 relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                          <Lock className="h-4 w-4" />
-                        </span>
-                        <Input
-                          type={showPwd ? "text" : "password"}
-                          placeholder="Mínimo 8 caracteres"
-                          value={newPwd}
-                          onChange={(e) => setNewPwd(e.target.value)}
-                          required
-                          autoFocus
-                          className="pl-10 pr-10 h-11 rounded-xl bg-white/90 dark:bg-white/5 border-white/10 focus-visible:ring-2 focus-visible:ring-primary"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPwd((v) => !v)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition"
-                          aria-label={showPwd ? "Ocultar password" : "Mostrar password"}
-                        >
-                          {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-
-                      {/* Barra de força */}
-                      <PwdStrengthBar score={pwdStrength.score} label={pwdStrength.label} />
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium">Confirmar palavra-passe</label>
-                      <div className="mt-1 relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                          <Lock className="h-4 w-4" />
-                        </span>
-                        <Input
-                          type={showConfirm ? "text" : "password"}
-                          placeholder="Repete a palavra-passe"
-                          value={confirmPwd}
-                          onChange={(e) => setConfirmPwd(e.target.value)}
-                          required
-                          className="pl-10 pr-10 h-11 rounded-xl bg-white/90 dark:bg-white/5 border-white/10 focus-visible:ring-2 focus-visible:ring-primary"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowConfirm((v) => !v)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition"
-                          aria-label={showConfirm ? "Ocultar password" : "Mostrar password"}
-                        >
-                          {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    {resetError && <Alert kind="error">{resetError}</Alert>}
-                    {resetOk && (
-                      <Alert kind="success">
-                        <div className="inline-flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4" />
-                          <span>Password atualizada. A redirecionar…</span>
-                        </div>
-                      </Alert>
-                    )}
-
-                    <Button
-                      type="submit"
-                      disabled={updating}
-                      className="h-11 rounded-xl font-semibold tracking-tight"
-                    >
-                      {updating ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" /> A atualizar…
-                        </span>
-                      ) : (
-                        "Guardar nova password"
-                      )}
-                    </Button>
-
-                    <div className="text-xs text-muted-foreground text-center mt-1.5">
-                      Preferes voltar?{" "}
-                      <Link to="/" className="text-primary hover:underline">
-                        Página inicial
-                      </Link>
-                    </div>
-                  </motion.form>
-                )}
+                <Link to="/" className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ArrowLeft className="h-4 w-4" /> Voltar
+                </Link>
               </div>
-            </div>
-          </div>
+              <CardTitle className="text-2xl">
+                {mode === "request" ? "Recuperar palavra‑passe" : "Definir nova palavra‑passe"}
+              </CardTitle>
+              <CardDescription>
+                {mode === "request"
+                  ? "Escreve o teu email e enviaremos um link de recuperação."
+                  : "Utiliza o formulário abaixo para definires uma nova password em segurança."}
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              {/* Estado a validar link */}
+              {mode === "reset" && (loadingLink || (!sessionReady && !linkError)) && (
+                <Alert className="bg-white/60 dark:bg-zinc-900/60">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <AlertTitle>A validar link…</AlertTitle>
+                  <AlertDescription>
+                    Estamos a confirmar o teu link de recuperação. Por favor aguarda um instante.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Erro de link */}
+              {mode === "reset" && linkError && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Não foi possível continuar</AlertTitle>
+                  <AlertDescription>
+                    {linkError}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* FORM REQUEST */}
+              {mode === "request" && (
+                <form onSubmit={sendEmail} className="space-y-4" aria-busy={sending}>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
+                        <Mail className="h-4 w-4" />
+                      </span>
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="o.teu@email.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        autoFocus
+                        className="pl-10 h-11"
+                      />
+                    </div>
+                  </div>
+
+                  {reqError && (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Erro</AlertTitle>
+                      <AlertDescription>{reqError}</AlertDescription>
+                    </Alert>
+                  )}
+                  {sentMsg && (
+                    <Alert className="bg-emerald-50/80 border-emerald-200">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <AlertTitle>Email enviado</AlertTitle>
+                      <AlertDescription>{sentMsg}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  <Button type="submit" className="w-full" disabled={sending}>
+                    {sending ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> A enviar…
+                      </>
+                    ) : (
+                      <>Enviar link</>
+                    )}
+                  </Button>
+
+                  <Separator />
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Lembraste da password?</span>
+                    <Button asChild variant="ghost" size="sm">
+                      <Link to="/auth">Entrar</Link>
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {/* FORM RESET */}
+              {mode === "reset" && (
+                <form onSubmit={handleUpdatePassword} className="space-y-4" aria-busy={updating}>
+                  <div className="space-y-2">
+                    <Label htmlFor="password">Nova palavra‑passe</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
+                        <Lock className="h-4 w-4" />
+                      </span>
+                      <Input
+                        id="password"
+                        type={showPw ? "text" : "password"}
+                        placeholder="Min. 8 caracteres"
+                        autoComplete="new-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="pl-10 pr-10 h-11"
+                        required
+                        minLength={8}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPw((s) => !s)}
+                        className="absolute inset-y-0 right-2 flex items-center text-zinc-500 hover:text-zinc-700"
+                        aria-label={showPw ? "Esconder password" : "Mostrar password"}
+                      >
+                        {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      <Progress value={strength} className="h-2" />
+                      <p className="text-xs text-muted-foreground">
+                        Força: {strength < 40 ? "fraca" : strength < 70 ? "média" : "forte"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm">Confirmar palavra‑passe</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
+                        <Lock className="h-4 w-4" />
+                      </span>
+                      <Input
+                        id="confirm"
+                        type={showConfirm ? "text" : "password"}
+                        placeholder="Repete a password"
+                        autoComplete="new-password"
+                        value={confirm}
+                        onChange={(e) => setConfirm(e.target.value)}
+                        className="pl-10 pr-10 h-11"
+                        required
+                        minLength={8}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirm((s) => !s)}
+                        className="absolute inset-y-0 right-2 flex items-center text-zinc-500 hover:text-zinc-700"
+                        aria-label={showConfirm ? "Esconder" : "Mostrar"}
+                      >
+                        {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    {confirm.length > 0 && !match && (
+                      <p className="text-xs text-red-600">As passwords não coincidem.</p>
+                    )}
+                  </div>
+
+                  {resetError && (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Erro</AlertTitle>
+                      <AlertDescription>{resetError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  {updated && (
+                    <Alert className="bg-emerald-50/80 border-emerald-200">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <AlertTitle>Password atualizada</AlertTitle>
+                      <AlertDescription>
+                        Redirecionar para a área reservada…
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  <Button type="submit" className="w-full" disabled={!canSubmit}>
+                    {updating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> A atualizar…
+                      </>
+                    ) : (
+                      <>Guardar nova password</>
+                    )}
+                  </Button>
+
+                  <Separator />
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Preferes voltar mais tarde?</span>
+                    <Button asChild variant="ghost" size="sm">
+                      <Link to="/">Página inicial</Link>
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </CardContent>
+          </Card>
         </motion.div>
       </div>
-
-      {/* CSS do aurora/partículas */}
-      <style>{AURORA_CSS}</style>
-    </div>
+    </>
   );
 }
-
-/* ------------------------- UI Helpers -------------------------- */
-
-function PwdStrengthBar({ score, label }: { score: number; label: string }) {
-  const pct = Math.min(100, Math.max(0, (score / 4) * 100));
-  const color =
-    score <= 1 ? "bg-red-500" : score === 2 ? "bg-yellow-500" : score === 3 ? "bg-emerald-500" : "bg-primary";
-  return (
-    <div className="mt-2">
-      <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
-        <div
-          className={`h-full ${color} transition-all`}
-          style={{ width: `${pct}%` }}
-          aria-hidden
-        />
-      </div>
-      <div className="mt-1 text-[11px] text-muted-foreground">{label}</div>
-    </div>
-  );
-}
-
-function Alert({ kind, children }: { kind: "success" | "error"; children: React.ReactNode }) {
-  const classes =
-    kind === "success"
-      ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-600"
-      : "border-destructive/30 bg-destructive/10 text-destructive";
-  return <div className={`text-sm rounded-md border px-3 py-2 ${classes}`}>{children}</div>;
-}
-
-function getPwdStrength(pwd: string): { score: number; label: string } {
-  let score = 0;
-  if (pwd.length >= 8) score++;
-  if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score++;
-  if (/\d/.test(pwd)) score++;
-  if (/[^A-Za-z0-9]/.test(pwd)) score++;
-  const label = ["Muito fraca", "Fraca", "Média", "Forte", "Excelente"][score] ?? "Muito fraca";
-  return { score, label };
-}
-
-/* ------------------------- Aurora BG --------------------------- */
-
-function AuroraBackground() {
-  return (
-    <div className="pointer-events-none absolute inset-0">
-      {/* véu suave */}
-      <div className="absolute inset-0 bg-[radial-gradient(1200px_600px_at_10%_-10%,hsl(var(--primary)/.25),transparent),radial-gradient(1000px_600px_at_110%_0%,#22d3ee22,transparent)]" />
-      {/* faixas aurora */}
-      <div className="aurora-wrap">
-        <div className="aurora a1" />
-        <div className="aurora a2" />
-        <div className="aurora a3" />
-        <div className="aurora a4" />
-      </div>
-      {/* partículas */}
-      <div className="particles">
-        {Array.from({ length: 28 }).map((_, i) => (
-          <span key={i} className="particle" style={{ ["--i" as any]: i + 1 }} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const AURORA_CSS = `
-.aurora-wrap { position: absolute; inset: -20% -10% -10% -10%; overflow: hidden; filter: blur(24px) saturate(120%); }
-.aurora {
-  position: absolute;
-  width: 55vw;
-  height: 55vh;
-  opacity: .55;
-  background: radial-gradient(60% 60% at 50% 50%, hsl(var(--primary) / .65), transparent 70%),
-              conic-gradient(from 180deg at 50% 50%, #22d3ee33, transparent 45%, #a78bfa33);
-  mix-blend-mode: screen;
-  animation: auroraMove 16s ease-in-out infinite alternate;
-}
-.aurora.a1 { left: -10%; top: -8%; animation-duration: 18s; }
-.aurora.a2 { right: -15%; top: 0%; animation-duration: 20s; }
-.aurora.a3 { left: 5%; bottom: -10%; animation-duration: 22s; }
-.aurora.a4 { right: 0%; bottom: -6%; animation-duration: 24s; }
-
-@keyframes auroraMove {
-  0% { transform: translate3d(0,0,0) rotate(0deg) scale(1); filter: hue-rotate(0deg); }
-  50% { transform: translate3d(2%, -2%, 0) rotate(6deg) scale(1.06); filter: hue-rotate(10deg); }
-  100% { transform: translate3d(-2%, 1%, 0) rotate(-4deg) scale(1.04); filter: hue-rotate(-10deg); }
-}
-
-.particles { position: absolute; inset: 0; overflow: hidden; }
-.particle {
-  position: absolute;
-  top: calc(100% * var(--i) / 28);
-  left: calc(100% * (var(--i) % 10) / 10);
-  width: 2px; height: 2px;
-  background: white; border-radius: 999px; opacity: .4;
-  animation: floatUp linear infinite;
-  animation-duration: calc(8s + (var(--i) * .25s));
-  filter: drop-shadow(0 0 8px #fff);
-}
-@keyframes floatUp {
-  0% { transform: translateY(20vh); opacity: 0; }
-  10% { opacity: .5; }
-  100% { transform: translateY(-120vh); opacity: 0; }
-}
-`;

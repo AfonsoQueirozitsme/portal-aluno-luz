@@ -258,7 +258,7 @@ export default function Landing() {
               Aprende mais, melhor.
             </motion.h1>
             <motion.p variants={fadeUp} custom={1} initial="hidden" animate="show" className="mt-4 max-w-2xl mx-auto text-[1.05rem] sm:text-lg text-muted-foreground">
-              Acompanho-te de forma real, com planos personalizados e resultados visíveis.
+              Acompanhamos-te de forma real, com planos personalizados e resultados visíveis.
             </motion.p>
           </motion.div>
 
